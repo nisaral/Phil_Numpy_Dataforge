@@ -391,27 +391,38 @@
             const resultCard = document.createElement("div");
             resultCard.className = "glass p-4 rounded-lg mb-4 border-l-4 border-indigo-500";
             resultCard.innerHTML = `<h3 class="text-xl font-semibold mb-2">${title}</h3>`;
+            
             if (isImage && !isStoryboard) {
                 resultCard.innerHTML += `<img src="${content}" alt="${title}" class="w-full rounded-lg">`;
-            } else if (isStoryboard) {
+            } else if (isStoryboard && manifest) {
                 resultCard.innerHTML += `
-                    <div id="storyboard-container" class="h-96">
-                        <canvas id="storyboard-canvas" class="w-full h-full"></canvas>
+                    <div class="mb-4">
+                        <h4 class="text-lg font-semibold mb-2">Summary</h4>
+                        <p class="whitespace-pre-line">${content}</p>
                     </div>
-                    <h3 class="text-xl font-semibold my-4">Key Moments</h3>
-                    <div class="grid grid-cols-3 gap-4">
-                        ${manifest.keyframes.filter(kf => kf.is_key_moment).map(m => `
-                            <div class="keyframe-card key-moment rounded-lg overflow-hidden">
-                                <img src="${m.path}" alt="Moment ${m.index + 1}" class="w-full">
-                                <div class="summary-popup bg-black bg-opacity-80 text-white p-2 text-sm">${m.summary}<br>Time: ${m.timestamp.toFixed(1)}s</div>
-                            </div>
-                        `).join('')}
+                    <div class="mb-4">
+                        <h4 class="text-lg font-semibold mb-2">Storyboard</h4>
+                        <img src="${manifest.storyboard}" alt="Storyboard" class="w-full rounded-lg mb-4">
+                    </div>
+                    <div class="mb-4">
+                        <h4 class="text-lg font-semibold mb-2">Key Moments</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${manifest.keyframes.filter(kf => kf.is_key_moment).map(m => `
+                                <div class="keyframe-card glass p-2 rounded-lg overflow-hidden hover-scale">
+                                    <img src="${m.path}" alt="Moment ${m.index + 1}" class="w-full h-48 object-cover rounded-lg mb-2">
+                                    <div class="text-sm">
+                                        <p class="font-semibold">Time: ${m.timestamp.toFixed(1)}s</p>
+                                        <p class="text-gray-300">${m.summary}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
                     </div>
                 `;
-                setTimeout(() => renderStoryboard(manifest), 100);
             } else {
                 resultCard.innerHTML += `<p class="whitespace-pre-line">${content}</p>`;
             }
+            
             document.getElementById("results-container").prepend(resultCard);
             gsap.from(resultCard, { opacity: 0, y: 20, duration: 0.3 });
         }
@@ -649,16 +660,24 @@
                 formData.append("youtube_url", youtubeUrl);
             }
 
-            postFileRequest(
-                "/analyze_video_basic",
-                formData,
-                "Video analyzed",
-                "Failed to analyze video",
-                ["video-file", "video-youtube-url"]
-            ).then(data => {
-                if (data && data.keyframes) {
-                    addResult("Video Analysis (Basic)", data.summary, false, true, JSON.parse(data.manifest));
+            toggleLoading(true);
+            fetch(`${API_BASE_URL}/analyze_video_basic`, {
+                method: "POST",
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                toggleLoading(false);
+                if (data.error) {
+                    showNotification(data.error, true);
+                    return;
                 }
+                showNotification("Video analyzed successfully");
+                addResult("Video Analysis", data.summary, false, true, JSON.parse(data.manifest));
+            })
+            .catch(error => {
+                toggleLoading(false);
+                showNotification("Failed to analyze video: " + error.message, true);
             });
         });
 
@@ -700,16 +719,24 @@
                 formData.append("youtube_url", youtubeUrl);
             }
 
-            postFileRequest(
-                "/analyze_video_enhanced",
-                formData,
-                "Video analyzed",
-                "Failed to analyze video",
-                ["video-enhanced-file", "video-enhanced-youtube-url"]
-            ).then(data => {
-                if (data && data.keyframes) {
-                    addResult("Video Analysis (Enhanced)", data.summary, false, true, JSON.parse(data.manifest));
+            toggleLoading(true);
+            fetch(`${API_BASE_URL}/analyze_video_enhanced`, {
+                method: "POST",
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                toggleLoading(false);
+                if (data.error) {
+                    showNotification(data.error, true);
+                    return;
                 }
+                showNotification("Video analyzed successfully");
+                addResult("Video Analysis (Enhanced)", data.summary, false, true, JSON.parse(data.manifest));
+            })
+            .catch(error => {
+                toggleLoading(false);
+                showNotification("Failed to analyze video: " + error.message, true);
             });
         });
 
