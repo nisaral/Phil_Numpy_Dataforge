@@ -80,10 +80,18 @@ def crawl_url(url):
 
 def get_youtube_transcript(url):
     try:
-        video_id = url.split("v=")[-1].split("&")[0]
+        # Extract video ID from various YouTube URL formats
+        if 'youtube.com/watch?v=' in url:
+            video_id = url.split('watch?v=')[1].split('&')[0]
+        elif 'youtu.be/' in url:
+            video_id = url.split('youtu.be/')[1].split('?')[0]
+        else:
+            return None
+            
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
         return " ".join(entry["text"] for entry in transcript)
-    except:
+    except Exception as e:
+        print(f"Transcript error: {str(e)}")
         return None
 
 def update_knowledge_base(text, source, source_type):
@@ -98,21 +106,26 @@ def update_knowledge_base(text, source, source_type):
 def download_youtube_video(url, output_dir="temp_videos"):
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"video_{uuid.uuid4()}.mp4")
+    
     try:
         ydl_opts = {
             'format': 'best[ext=mp4]',
             'outtmpl': output_path,
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': False
+            'extract_flat': False,
+            'noplaylist': True,
+            'ignoreerrors': True
         }
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+            
         if os.path.exists(output_path):
             return output_path
         return None
     except Exception as e:
-        print(f"YouTube download error: {e}")
+        print(f"YouTube download error: {str(e)}")
         return None
 
 def extract_keyframes(video_path, max_frames=10):
@@ -257,15 +270,40 @@ def add_youtube():
     task_id = str(uuid.uuid4())
     output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
     os.makedirs(output_dir, exist_ok=True)
+    
     data = request.get_json()
-    url, lang = data.get('youtube_url'), data.get('lang', 'en')
+    url = data.get('youtube_url')
+    lang = data.get('lang', 'en')
+    
     if not url:
         return jsonify({'error': 'Invalid URL'}), 400
-    transcript = get_youtube_transcript(url)
-    if transcript:
-        update_knowledge_base(transcript, url, "video")
-        return jsonify({'task_id': task_id, 'content': transcript})
-    return jsonify({'error': 'Failed to extract transcript'}), 500
+    
+    try:
+        # First try to get transcript
+        transcript = get_youtube_transcript(url)
+        if transcript:
+            update_knowledge_base(transcript, url, "video")
+            return jsonify({'task_id': task_id, 'content': transcript})
+        
+        # If transcript fails, try to download video
+        video_path = download_youtube_video(url)
+        if video_path:
+            # Process video to extract text
+            keyframes, key_moments, fps, duration = extract_keyframes(video_path)
+            if keyframes:
+                summaries = []
+                for idx, frame in keyframes:
+                    summary = generate_text_summary(frame, idx, fps, 'generic', lang)
+                    summaries.append(summary)
+                
+                content = " ".join(summaries)
+                update_knowledge_base(content, url, "video")
+                return jsonify({'task_id': task_id, 'content': content})
+        
+        return jsonify({'error': 'Failed to process YouTube content'}), 500
+    except Exception as e:
+        print(f"YouTube processing error: {str(e)}")
+        return jsonify({'error': f'Failed to process YouTube content: {str(e)}'}), 500
 
 @app.route('/add_text', methods=['POST'])
 def add_text():
