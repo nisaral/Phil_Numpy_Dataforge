@@ -3,751 +3,844 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KnowledgeForge</title>
+    <title>KnowledgeForge - AI Learning Assistant</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Mermaid from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.0/mermaid.min.js"></script>
     <style>
-        @keyframes gradient {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
+        :root {
+            --primary: #5e35b1;
+            --primary-light: #7c51d1;
+            --secondary: #00bcd4;
+            --dark: #1a1a2e;
+            --light: #f5f5f5;
+            --success: #4caf50;
+            --error: #f44336;
         }
-        .gradient-bg {
-            background: linear-gradient(45deg, #4f46e5, #7c3aed, #db2777, #f59e0b);
-            background-size: 400%;
-            animation: gradient 15s ease infinite;
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        .glass {
+
+        body {
+            background-color: var(--dark);
+            color: var(--light);
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.8;
+        }
+
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 30px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .glass-panel {
             background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 30px;
+            margin-bottom: 30px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        .hover-scale {
+
+        .glass-panel:hover {
+            transform: translateY(-8px) rotateX(2deg);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+            font-size: 28px;
+            color: var(--secondary);
+            text-shadow: 0 0 10px var(--secondary);
+        }
+
+        .logo i {
+            margin-right: 15px;
+            font-size: 36px;
+            animation: pulse 2s infinite;
+        }
+
+        .app-layout {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 30px;
+        }
+
+        h2 {
+            margin-bottom: 25px;
+            color: var(--secondary);
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            text-shadow: 0 0 5px var(--secondary);
+        }
+
+        h2 i {
+            margin-right: 12px;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 500;
+            color: #e0e0e0;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            color: var(--light);
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--secondary);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 10px rgba(0, 188, 212, 0.5);
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 5px 15px rgba(94, 53, 177, 0.4);
+        }
+
+        button:hover {
+            background: var(--primary-light);
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(94, 53, 177, 0.6);
+        }
+
+        button i {
+            margin-right: 10px;
+        }
+
+        .tab-container {
+            margin-bottom: 25px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 12px 25px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 5px 15px rgba(94, 53, 177, 0.4);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .results-area {
+            min-height: 300px;
+        }
+
+        .result-card {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-left: 5px solid var(--secondary);
             transition: transform 0.3s ease;
         }
-        .hover-scale:hover {
-            transform: scale(1.05);
+
+        .result-card:hover {
+            transform: scale(1.03);
         }
-        .fade-in {
+
+        .result-card h3 {
+            margin-bottom: 15px;
+            color: var(--secondary);
+            font-size: 20px;
+        }
+
+        .sources-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        .source-pill {
+            background: rgba(94, 53, 177, 0.3);
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .source-pill:hover {
+            background: rgba(94, 53, 177, 0.5);
+        }
+
+        .source-pill i {
+            margin-right: 8px;
+            font-size: 14px;
+        }
+
+        .notification {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--success);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            transform: translateY(100px);
             opacity: 0;
-            transform: translateY(20px);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .notification.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .notification.error {
+            background: var(--error);
+        }
+
+        .loader {
+            display: inline-block;
+            width: 25px;
+            height: 25px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .loading-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--secondary);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        .mind-map-container, .flowchart-container, .storyboard-container {
+            text-align: center;
+            margin-top: 25px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        .mermaid-diagram {
+            background: rgba(20, 20, 20, 0.5);
+            padding: 20px;
+            border-radius: 15px;
+            margin: 15px auto;
+            display: block;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+        .mermaid-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+            color: var(--secondary);
+            font-size: 18px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .mermaid-placeholder i {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .storyboard-scene {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 3px solid var(--secondary);
+        }
+
+        .storyboard-scene h4 {
+            color: var(--secondary);
+            margin-bottom: 10px;
+        }
+
+        .scene-description, .visual-description {
+            margin-bottom: 10px;
+        }
+
+        .scene-placeholder {
+            background: rgba(94, 53, 177, 0.2);
+            height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .app-layout {
+                grid-template-columns: 1fr;
+            }
+            .container {
+                padding: 20px;
+            }
+            .glass-panel {
+                padding: 20px;
+            }
+            .tabs {
+                gap: 10px;
+            }
+            .tab {
+                padding: 10px 15px;
+                font-size: 14px;
+            }
         }
     </style>
 </head>
-<body class="gradient-bg min-h-screen text-white">
+<body>
     <div id="canvas-container"></div>
-    <div class="container mx-auto px-4 py-8">
-        <header class="glass p-4 rounded-lg shadow-lg mb-8">
-            <div class="flex justify-between items-center">
-                <div class="text-2xl font-bold"><i class="fas fa-video mr-2"></i>KnowledgeForge</div>
-                <button id="clear-data" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-trash mr-2"></i>Clear</button>
+    
+    <div class="container">
+        <header class="glass-panel">
+            <div class="logo">
+                <i class="fas fa-brain"></i>
+                <span>KnowledgeForge</span>
+            </div>
+            <div>
+                <button id="clear-data">
+                    <i class="fas fa-trash"></i> Clear Data
+                </button>
             </div>
         </header>
         
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div class="glass p-6 rounded-lg shadow-lg">
-                <h2 class="text-2xl font-bold mb-6"><i class="fas fa-tools mr-2"></i>Actions</h2>
+        <div class="app-layout">
+            <div class="glass-panel">
+                <h2><i class="fas fa-database"></i> Knowledge Sources</h2>
                 
-                <div class="tabs flex flex-wrap gap-2 mb-6">
-                    <div class="tab active bg-indigo-600 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="add_web">Web</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="add_youtube">YouTube</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="add_text">Text</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="ask_question">Question</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="get_summary">Summary</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="generate_mock_test">Mock Test</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="generate_mind_map">Mind Map</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="generate_flowchart">Flowchart</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="analyze_video_basic">Video (Basic)</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="process_live_stream">Stream</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="analyze_video_enhanced">Video (Enhanced)</div>
-                    <div class="tab bg-indigo-500 text-white px-4 py-2 rounded-lg cursor-pointer" data-tab="exit">Exit</div>
+                <div class="tab-container">
+                    <div class="tabs">
+                        <div class="tab active" data-tab="web">Web URL</div>
+                        <div class="tab" data-tab="video">YouTube</div>
+                        <div class="tab" data-tab="text">Custom Text</div>
+                    </div>
+                    
+                    <div class="tab-content active" id="web-tab">
+                        <div class="input-group">
+                            <label for="web-url">Enter a URL to extract content:</label>
+                            <input type="url" id="web-url" placeholder="https://example.com/article">
+                        </div>
+                        <button id="add-web-content">
+                            <i class="fas fa-globe"></i> Add Web Content
+                        </button>
+                    </div>
+                    
+                    <div class="tab-content" id="video-tab">
+                        <div class="input-group">
+                            <label for="video-url">Enter a YouTube URL:</label>
+                            <input type="url" id="video-url" placeholder="https://www.youtube.com/watch?v=...">
+                        </div>
+                        <button id="add-video-content">
+                            <i class="fab fa-youtube"></i> Add Video Content
+                        </button>
+                    </div>
+                    
+                    <div class="tab-content" id="text-tab">
+                        <div class="input-group">
+                            <label for="custom-text">Enter your own content:</label>
+                            <textarea id="custom-text" rows="5" placeholder="Paste or type your content here..."></textarea>
+                        </div>
+                        <button id="add-text-content">
+                            <i class="fas fa-file-alt"></i> Add Text Content
+                        </button>
+                    </div>
                 </div>
                 
-                <div class="tab-content active" id="add_web-tab">
-                    <div class="mb-4">
-                        <label for="web-url" class="block mb-2">URL:</label>
-                        <input type="url" id="web-url" placeholder="https://example.com" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="web-lang" class="block mb-2">Language:</label>
-                        <select id="web-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="add-web-content" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-globe mr-2"></i>Add</button>
-                </div>
-                
-                <div class="tab-content hidden" id="add_youtube-tab">
-                    <div class="mb-4">
-                        <label for="youtube-url" class="block mb-2">YouTube URL:</label>
-                        <input type="url" id="youtube-url" placeholder="https://youtube.com/watch?v=..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="youtube-lang" class="block mb-2">Language:</label>
-                        <select id="youtube-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="add-youtube-content" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fab fa-youtube mr-2"></i>Add</button>
-                </div>
-                
-                <div class="tab-content hidden" id="add_text-tab">
-                    <div class="mb-4">
-                        <label for="custom-text" class="block mb-2">Text:</label>
-                        <textarea id="custom-text" rows="4" placeholder="Enter text..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white"></textarea>
-                    </div>
-                    <div class="mb-4">
-                        <label for="text-lang" class="block mb-2">Language:</label>
-                        <select id="text-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="add-text-content" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-file-alt mr-2"></i>Add</button>
-                </div>
-                
-                <div class="tab-content hidden" id="ask_question-tab">
-                    <div class="mb-4">
-                        <label for="question" class="block mb-2">Question:</label>
-                        <input type="text" id="question" placeholder="Ask about your content..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="question-lang" class="block mb-2">Language:</label>
-                        <select id="question-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="ask-button" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-search mr-2"></i>Ask</button>
-                </div>
-                
-                <div class="tab-content hidden" id="get_summary-tab">
-                    <div class="mb-4">
-                        <label for="summary-text" class="block mb-2">Text:</label>
-                        <textarea id="summary-text" rows="4" placeholder="Text to summarize..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white"></textarea>
-                    </div>
-                    <div class="mb-4">
-                        <label for="summary-lang" class="block mb-2">Language:</label>
-                        <select id="summary-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="get-summary" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-compress-alt mr-2"></i>Summarize</button>
-                </div>
-                
-                <div class="tab-content hidden" id="generate_mock_test-tab">
-                    <div class="mb-4">
-                        <label for="mock-test-text" class="block mb-2">Text:</label>
-                        <textarea id="mock-test-text" rows="4" placeholder="Text for mock test..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white"></textarea>
-                    </div>
-                    <div class="mb-4">
-                        <label for="mock-test-domain" class="block mb-2">Domain:</label>
-                        <select id="mock-test-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="mock-test-lang" class="block mb-2">Language:</label>
-                        <select id="mock-test-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="generate-mock-test" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-clipboard-check mr-2"></i>Generate</button>
-                </div>
-                
-                <div class="tab-content hidden" id="generate_mind_map-tab">
-                    <div class="mb-4">
-                        <label for="mind-map-text" class="block mb-2">Text:</label>
-                        <textarea id="mind-map-text" rows="4" placeholder="Text for mind map..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white"></textarea>
-                    </div>
-                    <div class="mb-4">
-                        <label for="mind-map-domain" class="block mb-2">Domain:</label>
-                        <select id="mind-map-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="mind-map-lang" class="block mb-2">Language:</label>
-                        <select id="mind-map-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="generate-mind-map" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-project-diagram mr-2"></i>Generate</button>
-                </div>
-                
-                <div class="tab-content hidden" id="generate_flowchart-tab">
-                    <div class="mb-4">
-                        <label for="flowchart-text" class="block mb-2">Text:</label>
-                        <textarea id="flowchart-text" rows="4" placeholder="Text for flowchart..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white"></textarea>
-                    </div>
-                    <div class="mb-4">
-                        <label for="flowchart-domain" class="block mb-2">Domain:</label>
-                        <select id="flowchart-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="flowchart-lang" class="block mb-2">Language:</label>
-                        <select id="flowchart-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="generate-flowchart" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-random mr-2"></i>Generate</button>
-                </div>
-                
-                <div class="tab-content hidden" id="analyze_video_basic-tab">
-                    <div class="mb-4">
-                        <label for="video-file" class="block mb-2">Video File (.mp4, .mov):</label>
-                        <input type="file" id="video-file" accept=".mp4,.mov" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-youtube-url" class="block mb-2">Or YouTube URL:</label>
-                        <input type="url" id="video-youtube-url" placeholder="https://youtube.com/watch?v=..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-basic-domain" class="block mb-2">Domain:</label>
-                        <select id="video-basic-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-basic-lang" class="block mb-2">Language:</label>
-                        <select id="video-basic-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="analyze-video-basic" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-video mr-2"></i>Analyze</button>
-                </div>
-                
-                <div class="tab-content hidden" id="process_live_stream-tab">
-                    <div class="mb-4">
-                        <label for="stream-url" class="block mb-2">Stream URL:</label>
-                        <input type="url" id="stream-url" placeholder="Enter stream URL" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="stream-domain" class="block mb-2">Domain:</label>
-                        <select id="stream-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="stream-lang" class="block mb-2">Language:</label>
-                        <select id="stream-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="process-live-stream" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-stream mr-2"></i>Process</button>
-                </div>
-                
-                <div class="tab-content hidden" id="analyze_video_enhanced-tab">
-                    <div class="mb-4">
-                        <label for="video-enhanced-file" class="block mb-2">Video File (.mp4, .mov):</label>
-                        <input type="file" id="video-enhanced-file" accept=".mp4,.mov" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-enhanced-youtube-url" class="block mb-2">Or YouTube URL:</label>
-                        <input type="url" id="video-enhanced-youtube-url" placeholder="https://youtube.com/watch?v=..." class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-enhanced-domain" class="block mb-2">Domain:</label>
-                        <select id="video-enhanced-domain" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for domain in domains %}
-                                <option value="{{ domain }}">{{ domain.capitalize() }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label for="video-enhanced-lang" class="block mb-2">Language:</label>
-                        <select id="video-enhanced-lang" class="w-full p-2 rounded-lg bg-white bg-opacity-10 border border-white border-opacity-20 text-white">
-                            {% for lang in languages %}
-                                <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button id="analyze-video-enhanced" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-video mr-2"></i>Analyze</button>
-                </div>
-                
-                <div class="tab-content hidden" id="exit-tab">
-                    <button onclick="location.reload()" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition hover-scale"><i class="fas fa-sign-out-alt mr-2"></i>Exit</button>
+                <h3>Active Sources</h3>
+                <div id="sources-list" class="sources-list">
+                    <div class="source-pill"><i class="fas fa-circle-notch fa-spin"></i> Loading sources...</div>
                 </div>
             </div>
             
-            <div class="lg:col-span-2 glass p-6 rounded-lg shadow-lg">
-                <h2 class="text-2xl font-bold mb-6"><i class="fas fa-lightbulb mr-2"></i>Results</h2>
-                <div id="results-container">
-                    <div class="glass p-4 rounded-lg mb-4 border-l-4 border-indigo-500">
-                        <h3 class="text-xl font-semibold mb-2">Welcome</h3>
-                        <p>Select an action to start analyzing content or videos.</p>
+            <div>
+                <div class="glass-panel">
+                    <h2><i class="fas fa-question-circle"></i> Ask Questions</h2>
+                    <div class="input-group">
+                        <label for="question">Ask anything about your content:</label>
+                        <input type="text" id="question" placeholder="What is the main concept of...?">
+                    </div>
+                    <div class="input-group">
+                        <label for="source-select">Specific source (optional):</label>
+                        <select id="source-select">
+                            <option value="">All sources</option>
+                        </select>
+                    </div>
+                    <button id="ask-button">
+                        <i class="fas fa-search"></i> Get Answer
+                    </button>
+                </div>
+                
+                <div class="glass-panel">
+                    <h2><i class="fas fa-tools"></i> Learning Tools</h2>
+                    <div class="tab-container">
+                        <div class="tabs">
+                            <div class="tab active" data-tool-tab="summary">Summary</div>
+                            <div class="tab" data-tool-tab="mocktest">Mock Test</div>
+                            <div class="tab" data-tool-tab="mindmap">Mind Map</div>
+                            <div class="tab" data-tool-tab="flowchart">Flowchart</div>
+                            <div class="tab" data-tool-tab="storyboard">Storyboard</div>
+                        </div>
+                        
+                        <div class="tab-content active" id="summary-tab">
+                            <div class="input-group">
+                                <label for="summary-source">Choose source (optional):</label>
+                                <select id="summary-source">
+                                    <option value="">All sources</option>
+                                </select>
+                            </div>
+                            <button id="get-summary">
+                                <i class="fas fa-compress-alt"></i> Generate Summary
+                            </button>
+                        </div>
+                        
+                        <div class="tab-content" id="mocktest-tab">
+                            <div class="input-group">
+                                <label for="test-topic">Test topic:</label>
+                                <input type="text" id="test-topic" placeholder="e.g., Machine Learning">
+                            </div>
+                            <div class="input-group">
+                                <label for="test-source">Choose source (optional):</label>
+                                <select id="test-source">
+                                    <option value="">All sources</option>
+                                </select>
+                            </div>
+                            <button id="generate-test">
+                                <i class="fas fa-clipboard-check"></i> Create Mock Test
+                            </button>
+                        </div>
+                        
+                        <div class="tab-content" id="mindmap-tab">
+                            <div class="input-group">
+                                <label for="mindmap-topic">Mind map topic:</label>
+                                <input type="text" id="mindmap-topic" placeholder="e.g., Artificial Intelligence">
+                            </div>
+                            <div class="input-group">
+                                <label for="mindmap-source">Choose source (optional):</label>
+                                <select id="mindmap-source">
+                                    <option value="">All sources</option>
+                                </select>
+                            </div>
+                            <button id="generate-mindmap">
+                                <i class="fas fa-project-diagram"></i> Create Mind Map
+                            </button>
+                        </div>
+                        
+                        <div class="tab-content" id="flowchart-tab">
+                            <div class="input-group">
+                                <label for="flowchart-topic">Flowchart topic or process:</label>
+                                <input type="text" id="flowchart-topic" placeholder="e.g., Data Processing">
+                            </div>
+                            <div class="input-group">
+                                <label for="flowchart-source">Choose source (optional):</label>
+                                <select id="flowchart-source">
+                                    <option value="">All sources</option>
+                                </select>
+                            </div>
+                            <button id="generate-flowchart">
+                                <i class="fas fa-random"></i> Create Flowchart
+                            </button>
+                        </div>
+                        
+                        <div class="tab-content" id="storyboard-tab">
+                            <div class="input-group">
+                                <label for="storyboard-concept">Storyboard concept:</label>
+                                <input type="text" id="storyboard-concept" placeholder="e.g., Learning Process">
+                            </div>
+                            <div class="input-group">
+                                <label for="storyboard-source">Choose source (optional):</label>
+                                <select id="storyboard-source">
+                                    <option value="">All sources</option>
+                                </select>
+                            </div>
+                            <button id="generate-storyboard">
+                                <i class="fas fa-film"></i> Create Storyboard
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="glass-panel results-area">
+                    <h2><i class="fas fa-lightbulb"></i> Results</h2>
+                    <div id="results-container">
+                        <div class="result-card">
+                            <h3>Welcome to KnowledgeForge</h3>
+                            <p>Start by adding content from web pages, YouTube videos, or your own text. Then use the tools to ask questions, generate summaries, create mock tests, or visualize concepts with mind maps and flowcharts.</p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <div class="notification fixed bottom-5 right-5 bg-green-500 text-white px-4 py-2 rounded-lg transform translate-y-24 opacity-0 transition-all duration-300 z-50" id="notification">Success!</div>
-    
-    <div class="loading-overlay fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 opacity-0 invisible transition-all duration-300" id="loading-overlay">
-        <div class="spinner w-12 h-12 border-4 border-white border-opacity-30 border-t-indigo-500 rounded-full animate-spin"></div>
+    <div class="notification" id="notification">Operation successful!</div>
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
     </div>
-
+    
     <script>
-        // Update API endpoints to use port 5001
-        const API_BASE_URL = 'http://localhost:5001';
+        // Initialize Mermaid
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: true,
+                theme: 'dark',
+                securityLevel: 'loose',
+                fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif'
+            });
+        } else {
+            console.error('Mermaid.js failed to load. Mind maps and flowcharts will not render.');
+        }
 
-        // Particle Background
+        // 3D Particle Background
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById("canvas-container").appendChild(renderer.domElement);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         const particlesGeometry = new THREE.BufferGeometry();
-        const posArray = new Float32Array(1500 * 3).map(() => (Math.random() - 0.5) * 15);
-        particlesGeometry.setAttribute("position", new THREE.BufferAttribute(posArray, 3));
-        const particles = new THREE.Points(particlesGeometry, new THREE.PointsMaterial({
+        const particlesCount = 1500;
+        const posArray = new Float32Array(particlesCount * 3);
+
+        for (let i = 0; i < particlesCount * 3; i++) {
+            posArray[i] = (Math.random() - 0.5) * 15;
+        }
+
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        const particlesMaterial = new THREE.PointsMaterial({
             size: 0.03,
             color: 0x00bcd4,
             transparent: true,
             opacity: 0.9
-        }));
-        scene.add(particles);
+        });
+
+        const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+        scene.add(particlesMesh);
+
         camera.position.z = 5;
 
         function animate() {
             requestAnimationFrame(animate);
-            particles.rotation.y += 0.001;
+            particlesMesh.rotation.x += 0.0008;
+            particlesMesh.rotation.y += 0.0008;
             renderer.render(scene, camera);
         }
         animate();
 
-        window.addEventListener("resize", () => {
+        window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Tabs
-        document.querySelectorAll(".tab").forEach(tab => {
-            tab.addEventListener("click", () => {
-                document.querySelectorAll(".tab").forEach(t => t.classList.remove("active", "bg-indigo-600") && t.classList.add("bg-indigo-500"));
-                document.querySelectorAll(".tab-content").forEach(c => c.classList.add("hidden"));
-                tab.classList.add("active", "bg-indigo-600");
-                tab.classList.remove("bg-indigo-500");
-                document.getElementById(`${tab.dataset.tab}-tab`).classList.remove("hidden");
-                gsap.from(`#${tab.dataset.tab}-tab`, { opacity: 0, y: 20, duration: 0.3 });
+        // Tab Functionality
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const parent = tab.parentElement;
+                parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const tabType = tab.hasAttribute('data-tab') ? 'data-tab' : 'data-tool-tab';
+                const tabId = tab.getAttribute(tabType);
+                
+                const contentContainer = parent.closest('.tab-container');
+                contentContainer.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(`${tabId}-tab`).classList.add('active');
             });
         });
 
-        // Utilities
+        // API Interaction
+        let sources = [];
+        const API_BASE_URL = 'http://localhost:5000/api';
+
         function showNotification(message, isError = false) {
-            const notification = document.getElementById("notification");
+            const notification = document.getElementById('notification');
             notification.textContent = message;
-            notification.classList.toggle("bg-red-500", isError);
-            notification.classList.toggle("bg-green-500", !isError);
-            notification.classList.add("translate-y-0", "opacity-100");
-            setTimeout(() => {
-                notification.classList.remove("translate-y-0", "opacity-100");
-                notification.classList.add("translate-y-24", "opacity-0");
-            }, 3000);
+            notification.classList.remove('error');
+            if (isError) notification.classList.add('error');
+            notification.classList.add('show');
+            setTimeout(() => notification.classList.remove('show'), 3000);
         }
 
         function toggleLoading(show) {
-            document.getElementById("loading-overlay").classList.toggle("opacity-100", show);
-            document.getElementById("loading-overlay").classList.toggle("visible", show);
-            document.getElementById("loading-overlay").classList.toggle("invisible", !show);
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.toggle('active', show);
         }
 
-        function addResult(title, content, isImage = false, isStoryboard = false, manifest = null) {
-            const resultCard = document.createElement("div");
-            resultCard.className = "glass p-4 rounded-lg mb-4 border-l-4 border-indigo-500";
-            resultCard.innerHTML = `<h3 class="text-xl font-semibold mb-2">${title}</h3>`;
-            
-            if (isImage && !isStoryboard) {
-                resultCard.innerHTML += `<img src="${content}" alt="${title}" class="w-full rounded-lg">`;
-            } else if (isStoryboard && manifest) {
-                resultCard.innerHTML += `
-                    <div class="mb-4">
-                        <h4 class="text-lg font-semibold mb-2">Summary</h4>
-                        <p class="whitespace-pre-line">${content}</p>
-                    </div>
-                    <div class="mb-4">
-                        <h4 class="text-lg font-semibold mb-2">Storyboard</h4>
-                        <img src="${manifest.storyboard}" alt="Storyboard" class="w-full rounded-lg mb-4">
-                    </div>
-                    <div class="mb-4">
-                        <h4 class="text-lg font-semibold mb-2">Key Moments</h4>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            ${manifest.keyframes.filter(kf => kf.is_key_moment).map(m => `
-                                <div class="keyframe-card glass p-2 rounded-lg overflow-hidden hover-scale">
-                                    <img src="${m.path}" alt="Moment ${m.index + 1}" class="w-full h-48 object-cover rounded-lg mb-2">
-                                    <div class="text-sm">
-                                        <p class="font-semibold">Time: ${m.timestamp.toFixed(1)}s</p>
-                                        <p class="text-gray-300">${m.summary}</p>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            } else {
-                resultCard.innerHTML += `<p class="whitespace-pre-line">${content}</p>`;
-            }
-            
-            document.getElementById("results-container").prepend(resultCard);
-            gsap.from(resultCard, { opacity: 0, y: 20, duration: 0.3 });
-        }
+        function updateSources() {
+            fetch(`${API_BASE_URL}/get-sources`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        sources = data.sources;
+                        const sourcesList = document.getElementById('sources-list');
+                        sourcesList.innerHTML = sources.length === 0
+                            ? '<div class="source-pill"><i class="fas fa-info-circle"></i> No sources added yet</div>'
+                            : sources.map(source => {
+                                const sourceType = source.includes('youtube') || source.includes('youtu.be') ? 'fab fa-youtube' : (source === 'User Input' ? 'fas fa-file-alt' : 'fas fa-globe');
+                                const shortSource = source.length > 30 ? source.substring(0, 30) + '...' : source;
+                                return `<div class="source-pill" title="${source}"><i class="${sourceType}"></i> ${shortSource}</div>`;
+                            }).join('');
 
-        // Storyboard
-        function renderStoryboard(manifest) {
-            const canvas = document.getElementById("storyboard-canvas");
-            if (!canvas) return;
-
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-
-            const cards = [];
-            const textureLoader = new THREE.TextureLoader();
-            manifest.keyframes.forEach((kf, i) => {
-                const texture = textureLoader.load(kf.path);
-                const card = new THREE.Mesh(
-                    new THREE.PlaneGeometry(1.5, 1),
-                    new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide })
-                );
-                card.position.set((kf.x / 100 - manifest.cols * 0.5) * 1.5, (kf.y / 100 - manifest.rows) * 1.5, kf.z / 50);
-                card.userData = kf;
-                scene.add(card);
-                cards.push(card);
-                gsap.from(card.position, { z: -5, duration: 0.5, delay: i * 0.1 });
-            });
-
-            camera.position.z = 5;
-            const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2();
-
-            canvas.addEventListener("mousemove", e => {
-                const rect = canvas.getBoundingClientRect();
-                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-                raycaster.setFromCamera(mouse, camera);
-                const intersects = raycaster.intersectObjects(cards);
-                cards.forEach(c => c.scale.set(1, 1, 1));
-                if (intersects.length) {
-                    gsap.to(intersects[0].object.scale, { x: 1.2, y: 1.2, duration: 0.3 });
-                }
-            });
-
-            function animateStoryboard() {
-                requestAnimationFrame(animateStoryboard);
-                renderer.render(scene, camera);
-            }
-            animateStoryboard();
-        }
-
-        // Event Listeners
-        function postRequest(endpoint, data, successMsg, errorMsg, clearInputs = []) {
-            toggleLoading(true);
-            return fetch(`${API_BASE_URL}${endpoint}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-            })
-            .then(res => res.json())
-            .then(data => {
-                toggleLoading(false);
-                if (data.error) {
-                    showNotification(data.error, true);
-                    return null;
-                }
-                showNotification(successMsg);
-                clearInputs.forEach(id => document.getElementById(id).value = "");
-                return data;
-            })
-            .catch(() => {
-                toggleLoading(false);
-                showNotification(errorMsg, true);
-                return null;
-            });
-        }
-
-        function postFileRequest(endpoint, formData, successMsg, errorMsg, clearInputs = []) {
-            toggleLoading(true);
-            return fetch(`${API_BASE_URL}${endpoint}`, {
-                method: "POST",
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                toggleLoading(false);
-                if (data.error) {
-                    showNotification(data.error, true);
-                    return null;
-                }
-                showNotification(successMsg);
-                clearInputs.forEach(id => {
-                    const input = document.getElementById(id);
-                    if (input.type === "file") input.value = "";
-                    else input.value = "";
+                        const sourceDropdowns = [
+                            'source-select', 
+                            'summary-source', 
+                            'test-source', 
+                            'mindmap-source', 
+                            'flowchart-source',
+                            'storyboard-source'
+                        ];
+                        
+                        sourceDropdowns.forEach(id => {
+                            const dropdown = document.getElementById(id);
+                            dropdown.innerHTML = '<option value="">All sources</option>' + 
+                                sources.map(source => {
+                                    const shortSource = source.length > 40 ? source.substring(0, 40) + '...' : source;
+                                    return `<option value="${source}">${shortSource}</option>`;
+                                }).join('');
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching sources:', error);
+                    showNotification('Failed to load sources', true);
                 });
-                return data;
-            })
-            .catch(() => {
-                toggleLoading(false);
-                showNotification(errorMsg, true);
-                return null;
-            });
         }
 
-        document.getElementById("add-web-content").addEventListener("click", () => {
-            const url = document.getElementById("web-url").value.trim();
-            const lang = document.getElementById("web-lang").value;
-            if (!url) return showNotification("Enter a URL", true);
-            postRequest(
-                "/add_web",
-                { web_url: url, lang },
-                "Web content added",
-                "Failed to add web content",
-                ["web-url"]
-            ).then(data => data && addResult("Web Content", data.content));
-        });
-
-        document.getElementById("add-youtube-content").addEventListener("click", () => {
-            const url = document.getElementById("youtube-url").value.trim();
-            const lang = document.getElementById("youtube-lang").value;
-            if (!url) return showNotification("Enter a YouTube URL", true);
-            postRequest(
-                "/add_youtube",
-                { youtube_url: url, lang },
-                "YouTube content added",
-                "Failed to add YouTube content",
-                ["youtube-url"]
-            ).then(data => data && addResult("YouTube Transcript", data.content));
-        });
-
-        document.getElementById("add-text-content").addEventListener("click", () => {
-            const text = document.getElementById("custom-text").value.trim();
-            const lang = document.getElementById("text-lang").value;
-            if (!text) return showNotification("Enter text", true);
-            postRequest(
-                "/add_text",
-                { text, lang },
-                "Text added",
-                "Failed to add text",
-                ["custom-text"]
-            ).then(data => data && addResult("Text Content", data.content));
-        });
-
-        document.getElementById("ask-button").addEventListener("click", () => {
-            const question = document.getElementById("question").value.trim();
-            const lang = document.getElementById("question-lang").value;
-            if (!question) return showNotification("Enter a question", true);
-            postRequest(
-                "/ask_question",
-                { question, lang },
-                "Question answered",
-                "Failed to answer question",
-                ["question"]
-            ).then(data => data && addResult("Answer", data.answer));
-        });
-
-        document.getElementById("get-summary").addEventListener("click", () => {
-            const text = document.getElementById("summary-text").value.trim();
-            const lang = document.getElementById("summary-lang").value;
-            if (!text) return showNotification("Enter text to summarize", true);
-            postRequest(
-                "/get_summary",
-                { text, lang },
-                "Summary generated",
-                "Failed to generate summary",
-                ["summary-text"]
-            ).then(data => data && addResult("Summary", data.summary));
-        });
-
-        document.getElementById("generate-mock-test").addEventListener("click", () => {
-            const text = document.getElementById("mock-test-text").value.trim();
-            const domain = document.getElementById("mock-test-domain").value;
-            const lang = document.getElementById("mock-test-lang").value;
-            if (!text) return showNotification("Enter text", true);
-            postRequest(
-                "/generate_mock_test",
-                { text, domain, lang },
-                "Mock test generated",
-                "Failed to generate mock test",
-                ["mock-test-text"]
-            ).then(data => data && addResult("Mock Test", data.mock_test));
-        });
-
-        document.getElementById("generate-mind-map").addEventListener("click", () => {
-            const text = document.getElementById("mind-map-text").value.trim();
-            const domain = document.getElementById("mind-map-domain").value;
-            const lang = document.getElementById("mind-map-lang").value;
-            if (!text) return showNotification("Enter text", true);
-            postRequest(
-                "/generate_mind_map",
-                { text, domain, lang },
-                "Mind map generated",
-                "Failed to generate mind map",
-                ["mind-map-text"]
-            ).then(data => data && addResult("Mind Map", data.mind_map, true));
-        });
-
-        document.getElementById("generate-flowchart").addEventListener("click", () => {
-            const text = document.getElementById("flowchart-text").value.trim();
-            const domain = document.getElementById("flowchart-domain").value;
-            const lang = document.getElementById("flowchart-lang").value;
-            if (!text) return showNotification("Enter text", true);
-            postRequest(
-                "/generate_flowchart",
-                { text, domain, lang },
-                "Flowchart generated",
-                "Failed to generate flowchart",
-                ["flowchart-text"]
-            ).then(data => data && addResult("Flowchart", data.flowchart, true));
-        });
-
-        document.getElementById("analyze-video-basic").addEventListener("click", () => {
-            const fileInput = document.getElementById("video-file");
-            const youtubeUrl = document.getElementById("video-youtube-url").value.trim();
-            const domain = document.getElementById("video-basic-domain").value;
-            const lang = document.getElementById("video-basic-lang").value;
-
-            if (!fileInput.files.length && !youtubeUrl) {
-                return showNotification("Select a video file or enter a YouTube URL", true);
+        function addResult(title, content, type = 'text') {
+            const resultsContainer = document.getElementById('results-container');
+            const resultCard = document.createElement('div');
+            resultCard.className = 'result-card';
+            resultCard.innerHTML = `<h3>${title}</h3>`;
+            
+            switch(type) {
+                case 'image':
+                    resultCard.innerHTML += `<div class="${title.toLowerCase().includes('mind') ? 'mind-map' : 'flowchart'}-container">
+                        <img src="${content}" alt="${title}">
+                    </div>`;
+                    break;
+                    
+                case 'mermaid':
+                    resultCard.innerHTML += `<div class="mermaid-diagram">
+                        <pre class="mermaid">${content}</pre>
+                    </div>`;
+                    // Re-initialize mermaid to render the new diagram
+                    if (typeof mermaid !== 'undefined') {
+                        mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+                    }
+                    break;
+                    
+                case 'storyboard':
+                    resultCard.innerHTML += `<div class="storyboard-container">${content}</div>`;
+                    break;
+                    
+                default: // text
+                    resultCard.innerHTML += `<p>${content.replace(/\n/g, '<br>')}</p>`;
             }
+            
+            resultsContainer.prepend(resultCard);
+        }
 
-            const formData = new FormData();
-            formData.append("domain", domain);
-            formData.append("lang", lang);
-
-            if (fileInput.files.length) {
-                const file = fileInput.files[0];
-                if (!["video/mp4", "video/quicktime"].includes(file.type)) {
-                    return showNotification("Only .mp4 or .mov files allowed", true);
-                }
-                formData.append("video", file);
-            } else {
-                formData.append("youtube_url", youtubeUrl);
-            }
-
+        // Event Listeners for the knowledge source tabs
+        document.getElementById('add-web-content').addEventListener('click', () => {
+            const url = document.getElementById('web-url').value.trim();
+            if (!url) return showNotification('Please enter a valid URL', true);
             toggleLoading(true);
-            fetch(`${API_BASE_URL}/analyze_video_basic`, {
-                method: "POST",
-                body: formData
+            fetch(`${API_BASE_URL}/add-web-content`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
             })
-            .then(res => res.json())
+            .then(response => response.json())
             .then(data => {
                 toggleLoading(false);
-                if (data.error) {
-                    showNotification(data.error, true);
-                    return;
+                showNotification(data.message, !data.success);
+                if (data.success) {
+                    document.getElementById('web-url').value = '';
+                    updateSources();
                 }
-                showNotification("Video analyzed successfully");
-                addResult("Video Analysis", data.summary, false, true, JSON.parse(data.manifest));
             })
             .catch(error => {
                 toggleLoading(false);
-                showNotification("Failed to analyze video: " + error.message, true);
+                showNotification('Failed to add web content', true);
+                console.error('Error:', error);
             });
         });
 
-        document.getElementById("process-live-stream").addEventListener("click", () => {
-            const url = document.getElementById("stream-url").value.trim();
-            const domain = document.getElementById("stream-domain").value;
-            const lang = document.getElementById("stream-lang").value;
-            if (!url) return showNotification("Enter a stream URL", true);
-            postRequest(
-                "/process_live_stream",
-                { stream_url: url, domain, lang },
-                "Stream processed",
-                "Failed to process stream",
-                ["stream-url"]
-            ).then(data => data && addResult("Stream Result", data.result));
-        });
-
-        document.getElementById("analyze-video-enhanced").addEventListener("click", () => {
-            const fileInput = document.getElementById("video-enhanced-file");
-            const youtubeUrl = document.getElementById("video-enhanced-youtube-url").value.trim();
-            const domain = document.getElementById("video-enhanced-domain").value;
-            const lang = document.getElementById("video-enhanced-lang").value;
-
-            if (!fileInput.files.length && !youtubeUrl) {
-                return showNotification("Select a video file or enter a YouTube URL", true);
+        document.getElementById('add-video-content').addEventListener('click', () => {
+            const url = document.getElementById('video-url').value.trim();
+            if (!url) return showNotification('Please enter a valid YouTube URL', true);
+            if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+                return showNotification('Please enter a valid YouTube URL', true);
             }
-
-            const formData = new FormData();
-            formData.append("domain", domain);
-            formData.append("lang", lang);
-
-            if (fileInput.files.length) {
-                const file = fileInput.files[0];
-                if (!["video/mp4", "video/quicktime"].includes(file.type)) {
-                    return showNotification("Only .mp4 or .mov files allowed", true);
-                }
-                formData.append("video", file);
-            } else {
-                formData.append("youtube_url", youtubeUrl);
-            }
-
+            
             toggleLoading(true);
-            fetch(`${API_BASE_URL}/analyze_video_enhanced`, {
-                method: "POST",
-                body: formData
+            fetch(`${API_BASE_URL}/add-video`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
             })
-            .then(res => res.json())
+            .then(response => response.json())
             .then(data => {
                 toggleLoading(false);
-                if (data.error) {
-                    showNotification(data.error, true);
-                    return;
+                showNotification(data.message, !data.success);
+                if (data.success) {
+                    document.getElementById('video-url').value = '';
+                    updateSources();
                 }
-                showNotification("Video analyzed successfully");
-                addResult("Video Analysis (Enhanced)", data.summary, false, true, JSON.parse(data.manifest));
             })
             .catch(error => {
                 toggleLoading(false);
-                showNotification("Failed to analyze video: " + error.message, true);
+                showNotification('Failed to add video content', true);
+                console.error('Error:', error);
             });
         });
 
-        document.getElementById("clear-data").addEventListener("click", () => {
-            document.getElementById("results-container").innerHTML = `
-                <div class="glass p-4 rounded-lg mb-4 border-l-4 border-indigo-500">
-                    <h3 class="text-xl font-semibold mb-2">Welcome</h3>
-                    <p>Select an action to start analyzing content or videos.</p>
-                </div>`;
-            showNotification("Results cleared");
+        document.getElementById('add-text-content').addEventListener('click', () => {
+            const text = document.getElementById('custom-text').value.trim();
+            if (!text) return showNotification('Please enter some text content', true);
+            toggleLoading(true);
+            fetch(`${API_BASE_URL}/add-text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            })
+            .then(response => response.json())
+            .then(data => {
+                toggleLoading(false);
+                showNotification(data.message, !data.success);
+                if (data.success) {
+                    document.getElementById('custom-text').value = '';
+                    updateSources();
+                }
+            })
+            .catch(error => {
+                toggleLoading(false);
+                showNotification('Failed to add text content', true);
+                console.error('Error:', error);
+            });
         });
-    </script>
-</body>
-</html>
+
+        
