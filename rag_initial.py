@@ -20,6 +20,9 @@ import yt_dlp
 from deep_translator import GoogleTranslator
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
+from typing import List
+from crawler import WebCrawler
+from extraction_strategy import JsonCssExtractionStrategy
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -52,6 +55,13 @@ index = faiss.IndexFlatL2(384)
 knowledge_base = []
 yolo_model = YOLO("yolov11n.pt") if os.path.exists("yolov11n.pt") else None
 
+# Initialize Crawler for YouTube
+crawler = WebCrawler()
+crawler.warmup()
+extraction_strategy = JsonCssExtractionStrategy(
+    schema={"text_content": {"css": "p", "type": "string"}}
+)
+
 def translate_text(text, lang):
     try:
         return GoogleTranslator(source='auto', target=lang).translate(text) if lang != 'en' else text
@@ -78,30 +88,46 @@ def crawl_url(url):
         print(f"Crawl error: {e}")
         return None
 
-def get_youtube_transcript(url):
+def crawl_youtube(video_url: str) -> str:
+    try:
+        result = crawler.run(url=video_url, extraction_strategy=extraction_strategy, bypass_cache=True)
+        if result.success and result.extracted_content:
+            return " ".join([item["text_content"] for item in result.extracted_content if "text_content" in item])
+        return None
+    except Exception as e:
+        print(f"Error crawling YouTube {video_url}: {str(e)}")
+        return None
+
+def get_youtube_transcript(video_url: str) -> str:
     try:
         # Extract video ID from various YouTube URL formats
-        if 'youtube.com/watch?v=' in url:
-            video_id = url.split('watch?v=')[1].split('&')[0]
-        elif 'youtu.be/' in url:
-            video_id = url.split('youtu.be/')[1].split('?')[0]
+        if 'youtube.com/watch?v=' in video_url:
+            video_id = video_url.split('watch?v=')[1].split('&')[0]
+        elif 'youtu.be/' in video_url:
+            video_id = video_url.split('youtu.be/')[1].split('?')[0]
         else:
             return None
             
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        return " ".join(entry["text"] for entry in transcript)
+        return " ".join([entry["text"] for entry in transcript])
     except Exception as e:
-        print(f"Transcript error: {str(e)}")
+        print(f"Error fetching transcript for {video_url}: {e}")
         return None
 
-def update_knowledge_base(text, source, source_type):
+def chunk_text(text: str, max_length: int = 500) -> List[str]:
+    words = text.split()
+    return [" ".join(words[i:i+max_length]) for i in range(0, len(words), max_length)]
+
+def update_knowledge_base(text: str, source: str, source_type: str):
     if not text:
         return
-    chunks = [text[i:i+500] for i in range(0, len(text), 500)]
+    chunks = chunk_text(text)
     embeddings = embedder.encode(chunks, convert_to_numpy=True)
     index.add(embeddings)
     for chunk in chunks:
         knowledge_base.append({"text": chunk, "source": source, "type": source_type})
+    vector_base.extend(embeddings)
+    print(f"Added {len(chunks)} chunks from {source} ({source_type}) to knowledge base.")
 
 def download_youtube_video(url, output_dir="temp_videos"):
     os.makedirs(output_dir, exist_ok=True)
@@ -160,51 +186,103 @@ def extract_keyframes(video_path, max_frames=10):
     return sorted(keyframes, key=lambda x: x[0]), sorted(key_moments, key=lambda x: x[0]), fps, duration
 
 def generate_text_summary(frame, frame_idx, fps, domain, lang='en'):
-    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
-    objects = [yolo_model.names[int(box.cls)] for result in yolo_model(frame, verbose=False) for box in result.boxes] if yolo_model else []
-    prompt = f"{domain_info['prompt']} Time: {frame_idx/fps:.2f}s. Objects: {', '.join(objects) or 'none'}. Describe in 1-2 sentences."
     try:
+        # Convert frame to RGB for YOLO
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Detect objects
+        objects = []
+        if yolo_model:
+            results = yolo_model(frame_rgb, verbose=False)
+            objects = [yolo_model.names[int(box.cls)] for result in results for box in result.boxes]
+        
+        # Create prompt for Gemini
+        prompt = f"""
+        Analyze this video frame at timestamp {frame_idx/fps:.2f}s.
+        Objects detected: {', '.join(objects) if objects else 'none'}
+        
+        Provide a clear, concise description of what's happening in this frame.
+        Focus on:
+        1. Main subjects/objects
+        2. Actions or movements
+        3. Important details
+        4. Scene context
+        
+        Keep the description informative but brief (1-2 sentences).
+        """
+        
         model = genai.GenerativeModel('gemini-1.5-flash')
-        summary = model.generate_content(prompt).text.strip()
-        return translate_text(summary, lang)
-    except:
-        return f"Scene at {frame_idx/fps:.2f}s."
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
+        
+        # Translate if needed
+        if lang != 'en':
+            summary = translate_text(summary, lang)
+            
+        return summary
+    except Exception as e:
+        print(f"Error generating summary: {str(e)}")
+        return f"Scene at {frame_idx/fps:.2f}s"
 
 def create_storyboard_image(keyframes, key_moments, summaries, output_dir, domain, video_input, duration, fps, lang='en'):
-    os.makedirs(output_dir, exist_ok=True)
-    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
-    num_images, cols = len(keyframes), min(3, len(keyframes))
-    rows = (num_images + cols - 1) // cols
-    cell_width, cell_height, margin = 300, 200, 20
-    total_width = cols * (cell_width + margin) + margin
-    total_height = rows * (cell_height + 100 + margin) + 100
-    storyboard = Image.new('RGB', (total_width, total_height), (255, 255, 255))
-    draw = ImageDraw.Draw(storyboard)
-    font = get_font(lang)
-
-    for i, (frame_idx, frame) in enumerate(keyframes):
-        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((cell_width, cell_height))
-        x = margin + (i % cols) * (cell_width + margin)
-        y = margin + 80 + (i // cols) * (cell_height + 100 + margin)
-        storyboard.paste(img, (x, y))
-        draw.text((x, y + cell_height + 10), f"Time: {frame_idx/fps:.1f}s", fill=domain_info['colors']['text'], font=font)
-        draw.text((x, y + cell_height + 30), summaries[i][:100], fill=domain_info['colors']['text'], font=font)
-
-    output_path = os.path.join(output_dir, 'storyboard.jpg')
-    storyboard.save(output_path)
-    manifest = {
-        'keyframes': [{'index': i, 'frame_idx': kf[0], 'timestamp': kf[0]/fps, 'summary': s, 'path': f'keyframe_{i+1}.jpg', 'is_key_moment': kf[0] in [km[0] for km in key_moments], 'x': margin + (i % cols) * (cell_width + margin), 'y': margin + 80 + (i // cols) * (cell_height + 100 + margin), 'z': -i * 10} for i, (kf, s) in enumerate(zip(keyframes, summaries))],
-        'key_moments': [{'frame_idx': km[0], 'timestamp': km[0]/fps} for km in key_moments],
-        'domain': domain,
-        'video_name': os.path.basename(video_input)[:50],
-        'language': lang,
-        'duration': duration,
-        'cols': cols,
-        'rows': rows
-    }
-    with open(os.path.join(output_dir, 'storyboard_manifest.json'), 'w') as f:
-        json.dump(manifest, f)
-    return output_path
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Calculate grid layout
+        num_images = len(keyframes)
+        cols = min(3, num_images)
+        rows = (num_images + cols - 1) // cols
+        
+        # Calculate image dimensions
+        cell_width, cell_height = 300, 200
+        margin = 20
+        total_width = cols * (cell_width + margin) + margin
+        total_height = rows * (cell_height + 100 + margin) + 100
+        
+        # Create storyboard image
+        storyboard = Image.new('RGB', (total_width, total_height), (255, 255, 255))
+        draw = ImageDraw.Draw(storyboard)
+        
+        # Add title
+        title = f"Storyboard - {os.path.basename(video_input)[:50]}"
+        draw.text((margin, margin), title, fill=(0, 0, 0), font=ImageFont.truetype("arial.ttf", 24))
+        
+        # Add frames
+        for i, (frame_idx, frame) in enumerate(keyframes):
+            # Convert frame to PIL Image
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_pil = Image.fromarray(frame_rgb)
+            
+            # Resize frame
+            frame_pil = frame_pil.resize((cell_width, cell_height))
+            
+            # Calculate position
+            x = margin + (i % cols) * (cell_width + margin)
+            y = margin + 50 + (i // cols) * (cell_height + 100 + margin)
+            
+            # Paste frame
+            storyboard.paste(frame_pil, (x, y))
+            
+            # Add timestamp and summary
+            timestamp = f"Time: {frame_idx/fps:.1f}s"
+            draw.text((x, y + cell_height + 10), timestamp, fill=(0, 0, 0), font=ImageFont.truetype("arial.ttf", 12))
+            
+            # Add summary (truncate if too long)
+            summary = summaries[i][:100] + "..." if len(summaries[i]) > 100 else summaries[i]
+            draw.text((x, y + cell_height + 30), summary, fill=(0, 0, 0), font=ImageFont.truetype("arial.ttf", 12))
+            
+            # Save individual keyframe
+            keyframe_path = os.path.join(output_dir, f"keyframe_{i+1}.jpg")
+            frame_pil.save(keyframe_path)
+        
+        # Save storyboard
+        storyboard_path = os.path.join(output_dir, "storyboard.jpg")
+        storyboard.save(storyboard_path)
+        
+        return storyboard_path
+    except Exception as e:
+        print(f"Error creating storyboard: {str(e)}")
+        return None
 
 def process_video(video_input, domain, output_dir, lang='en', enhanced=False):
     os.makedirs(output_dir, exist_ok=True)
@@ -279,28 +357,65 @@ def add_youtube():
         return jsonify({'error': 'Invalid URL'}), 400
     
     try:
-        # First try to get transcript
-        transcript = get_youtube_transcript(url)
-        if transcript:
-            update_knowledge_base(transcript, url, "video")
-            return jsonify({'task_id': task_id, 'content': transcript})
-        
-        # If transcript fails, try to download video
+        # First download the video
         video_path = download_youtube_video(url)
-        if video_path:
-            # Process video to extract text
-            keyframes, key_moments, fps, duration = extract_keyframes(video_path)
-            if keyframes:
-                summaries = []
-                for idx, frame in keyframes:
-                    summary = generate_text_summary(frame, idx, fps, 'generic', lang)
-                    summaries.append(summary)
-                
-                content = " ".join(summaries)
-                update_knowledge_base(content, url, "video")
-                return jsonify({'task_id': task_id, 'content': content})
+        if not video_path:
+            return jsonify({'error': 'Failed to download YouTube video'}), 500
+            
+        # Extract keyframes and process video
+        keyframes, key_moments, fps, duration = extract_keyframes(video_path)
+        if not keyframes:
+            return jsonify({'error': 'Failed to extract keyframes'}), 500
+            
+        # Generate summaries for each keyframe
+        summaries = []
+        for idx, frame in keyframes:
+            summary = generate_text_summary(frame, idx, fps, 'generic', lang)
+            summaries.append(summary)
+            
+        # Create storyboard
+        storyboard_path = create_storyboard_image(
+            keyframes, key_moments, summaries, 
+            output_dir, 'generic', url, 
+            duration, fps, lang
+        )
         
-        return jsonify({'error': 'Failed to process YouTube content'}), 500
+        # Get video description and transcript
+        description = crawl_youtube(url) or ""
+        transcript = get_youtube_transcript(url) or ""
+        
+        # Combine all content
+        content = f"""
+Video Summary:
+{chr(10).join(summaries)}
+
+Video Description:
+{description}
+
+Transcript:
+{transcript}
+"""
+        
+        # Update knowledge base
+        update_knowledge_base(content, url, "video")
+        
+        # Create manifest
+        manifest = {
+            'keyframes': [{'index': i, 'frame_idx': kf[0], 'timestamp': kf[0]/fps, 'summary': s, 'path': f'/results/{task_id}/keyframe_{i+1}.jpg', 'is_key_moment': kf[0] in [km[0] for km in key_moments]} for i, (kf, s) in enumerate(zip(keyframes, summaries))],
+            'key_moments': [{'frame_idx': km[0], 'timestamp': km[0]/fps} for km in key_moments],
+            'storyboard': f'/results/{task_id}/storyboard.jpg',
+            'description': description,
+            'transcript': transcript,
+            'duration': duration,
+            'fps': fps
+        }
+        
+        return jsonify({
+            'task_id': task_id,
+            'content': content,
+            'manifest': json.dumps(manifest)
+        })
+        
     except Exception as e:
         print(f"YouTube processing error: {str(e)}")
         return jsonify({'error': f'Failed to process YouTube content: {str(e)}'}), 500
