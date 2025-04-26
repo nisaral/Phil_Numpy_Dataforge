@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Summarizer Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .gradient-bg {
+            background: linear-gradient(45deg, #4f46e5, #7c3aed, #db2777, #f59e0b);
+            background-size: 400%;
+            animation: gradient 15s ease infinite;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .hover-scale {
+            transition: transform 0.3s ease;
+        }
+        .hover-scale:hover {
+            transform: scale(1.05);
+        }
+        .fade-in {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <!-- Navbar -->
+    <nav class="glass fixed top-0 left-0 right-0 z-50 p-4 shadow-lg">
+        <div class="container mx-auto flex items-center justify-between">
+            <h1 class="text-2xl font-bold">Video Summarizer</h1>
+            <div class="space-x-4">
+                <a href="#home" class="hover:text-indigo-200 transition">Home</a>
+                <a href="#features" class="hover:text-indigo-200 transition">Features</a>
+                <a href="#dashboard" class="hover:text-indigo-200 transition">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="pt-24 pb-16 text-center">
+        <div class="container mx-auto px-4">
+            <h2 class="text-5xl font-bold mb-6">Summarize Videos in Seconds</h2>
+            <p class="text-xl mb-8 max-w-2xl mx-auto">Upload your video and get instant summaries, storyboards, and narrated clips with our AI-powered tool.</p>
+            <button id="getStarted" class="bg-indigo-600 text-white px-8 py-3 rounded-full hover:bg-indigo-700 transition hover-scale">Get Started</button>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-16">
+        <div class="container mx-auto px-4">
+            <h2 class="text-4xl font-bold text-center mb-12">Why Choose Us?</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="glass p-6 rounded-lg hover-scale">
+                    <svg class="w-12 h-12 mb-4 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    <h3 class="text-xl font-semibold mb-2">Smart Scene Detection</h3>
+                    <p>Automatically identifies key moments in your video for precise summaries.</p>
+                </div>
+                <div class="glass p-6 rounded-lg hover-scale">
+                    <svg class="w-12 h-12 mb-4 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <h3 class="text-xl font-semibold mb-2">Visual Storyboards</h3>
+                    <p>Generates stunning storyboards to visualize your video's key scenes.</p>
+                </div>
+                <div class="glass p-6 rounded-lg hover-scale">
+                    <svg class="w-12 h-12 mb-4 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <h3 class="text-xl font-semibold mb-2">Narrated Summaries</h3>
+                    <p>Creates narrated video summaries with high-quality AI-generated voice.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Section -->
+    <section id="dashboard" class="py-16">
+        <div class="container mx-auto px-4">
+            <h2 class="text-4xl font-bold text-center mb-12">Your Video Summarizer Dashboard</h2>
+            
+            <!-- File Upload -->
+            <div class="mb-12">
+                <label class="block text-2xl font-semibold mb-4 text-center">Upload Your Video</label>
+                <div class="flex items-center justify-center w-full">
+                    <label class="flex flex-col items-center justify-center w-full max-w-2xl h-64 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                        <svg class="w-16 h-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l-4-4m0 0l4-4m0 0h14" />
+                        </svg>
+                        <p class="mt-2 text-lg text-gray-600">Drag and drop your video here, or click to select</p>
+                        <input id="videoInput" type="file" accept="video/*" class="hidden" />
+                    </label>
+                </div>
+            </div>
+
+            <!-- Processing Animation -->
+            <div id="processing" class="hidden flex-col items-center justify-center py-16">
+                <div class="animate-spin rounded-full h-32 w-32 border-t-4 border-b-4 border-white"></div>
+                <p class="mt-4 text-2xl">Processing your video...</p>
+            </div>
+
+            <!-- Results Dashboard -->
+            <div id="results" class="hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Summary Panel -->
+                    <div class="glass rounded-lg p-6 shadow-lg hover-scale">
+                        <h3 class="text-2xl font-semibold mb-4">Video Summary</h3>
+                        <div id="summaryText" class="text-gray-200 max-h-80 overflow-y-auto mb-4"></div>
+                        <button id="downloadSummary" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Download Summary</button>
+                    </div>
+
+                    <!-- Storyboard Panel -->
+                    <div class="glass rounded-lg p-6 shadow-lg hover-scale">
+                        <h3 class="text-2xl font-semibold mb-4">Storyboard</h3>
+                        <div id="storyboardImages" class="grid grid-cols-2 gap-4 mb-4"></div>
+                        <button id="downloadStoryboard" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Download Storyboard PDF</button>
+                    </div>
+
+                    <!-- Video Preview Panel -->
+                    <div class="glass rounded-lg p-6 shadow-lg hover-scale">
+                        <h3 class="text-2xl font-semibold mb-4">Summary Video</h3>
+                        <video id="summaryVideo" controls class="w-full rounded-lg mb-4"></video>
+                        <button id="downloadVideo" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Download Video</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-8 text-center">
+        <p>&copy; 2025 Video Summarizer. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // GSAP Animations
+        gsap.from("nav", { duration: 1, y: -50, opacity: 0, ease: "power3.out" });
+        gsap.from("#home", { duration: 1, delay: 0.5, opacity: 0, y: 50, ease: "power3.out" });
+        gsap.from("#features > div > div", { duration: 1, delay: 1, opacity: 0, stagger: 0.2, y: 50, ease: "power3.out" });
+
+        // Scroll to Section
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                target.scrollIntoView({ behavior: 'smooth' });
+            });
+        });
+
+        // Get Started Button
+        document.getElementById('getStarted').addEventListener('click', () => {
+            document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        // File Input Handler
+        const videoInput = document.getElementById('videoInput');
+        const processingDiv = document.getElementById('processing');
+        const resultsDiv = document.getElementById('results');
+        const summaryText = document.getElementById('summaryText');
+        const storyboardImages = document.getElementById('storyboardImages');
+        const summaryVideo = document.getElementById('summaryVideo');
+        const downloadSummary = document.getElementById('downloadSummary');
+        const downloadStoryboard = document.getElementById('downloadStoryboard');
+        const downloadVideo = document.getElementById('downloadVideo');
+
+        let currentJobId = null;
+
+        videoInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Show processing animation
+            processingDiv.classList.remove('hidden');
+            resultsDiv.classList.add('hidden');
+
+            try {
+                // Create form data
+                const formData = new FormData();
+                formData.append('video', file);
+
+                // Upload and process video
+                const response = await fetch('/api/process-video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to process video');
+                }
+
+                const data = await response.json();
+                currentJobId = data.job_id;
+
+                // Display results
+                summaryText.textContent = data.summary;
+                
+                // Load storyboard images
+                storyboardImages.innerHTML = `
+                    <img src="${data.storyboard_image}" alt="Storyboard" class="w-full rounded-lg">
+                `;
+
+                // Load summary video
+                summaryVideo.src = data.summary_video;
+
+                // Setup download buttons
+                downloadSummary.onclick = () => {
+                    const blob = new Blob([data.summary], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'summary.txt';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                downloadStoryboard.onclick = () => {
+                    window.location.href = data.storyboard_pdf;
+                };
+
+                downloadVideo.onclick = () => {
+                    window.location.href = data.summary_video;
+                };
+
+                // Animate results display
+                gsap.to(processingDiv, { 
+                    duration: 0.5, 
+                    opacity: 0, 
+                    onComplete: () => {
+                        processingDiv.classList.add('hidden');
+                        resultsDiv.classList.remove('hidden');
+                        gsap.from(resultsDiv.children[0].children, { 
+                            duration: 1, 
+                            opacity: 0, 
+                            y: 50, 
+                            stagger: 0.2, 
+                            ease: "power3.out" 
+                        });
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error processing video:', error);
+                alert('Failed to process video. Please try again.');
+                processingDiv.classList.add('hidden');
+            }
+        });
+
+        // Add status checking function
+        async function checkProcessingStatus(jobId) {
+            try {
+                const response = await fetch(`/api/status/${jobId}`);
+                const data = await response.json();
+                
+                if (data.status === 'complete') {
+                    // Fetch and display results
+                    const resultsResponse = await fetch(`/api/results/${jobId}`);
+                    const resultsData = await resultsResponse.json();
+                    
+                    // Update UI with results
+                    summaryText.textContent = resultsData.summary;
+                    storyboardImages.innerHTML = `
+                        <img src="${resultsData.storyboard_image}" alt="Storyboard" class="w-full rounded-lg">
+                    `;
+                    summaryVideo.src = resultsData.summary_video;
+                    
+                    // Hide processing animation and show results
+                    processingDiv.classList.add('hidden');
+                    resultsDiv.classList.remove('hidden');
+                    
+                    // Animate results display
+                    gsap.from(resultsDiv.children[0].children, { 
+                        duration: 1, 
+                        opacity: 0, 
+                        y: 50, 
+                        stagger: 0.2, 
+                        ease: "power3.out" 
+                    });
+                } else {
+                    // Continue checking status
+                    setTimeout(() => checkProcessingStatus(jobId), 5000);
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+                alert('Failed to check processing status. Please refresh the page.');
+                processingDiv.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
