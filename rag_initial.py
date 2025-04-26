@@ -99,15 +99,20 @@ def download_youtube_video(url, output_dir="temp_videos"):
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"video_{uuid.uuid4()}.mp4")
     try:
-        subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        ydl_opts = {'format': 'best[ext=mp4]', 'outtmpl': output_path, 'quiet': True}
-    except:
-        ydl_opts = {'format': 'best[ext=mp4]', 'outtmpl': output_path, 'quiet': True}
-    try:
+        ydl_opts = {
+            'format': 'best[ext=mp4]',
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        return output_path
-    except:
+        if os.path.exists(output_path):
+            return output_path
+        return None
+    except Exception as e:
+        print(f"YouTube download error: {e}")
         return None
 
 def extract_keyframes(video_path, max_frames=10):
@@ -191,30 +196,41 @@ def create_storyboard_image(keyframes, key_moments, summaries, output_dir, domai
 def process_video(video_input, domain, output_dir, lang='en', enhanced=False):
     os.makedirs(output_dir, exist_ok=True)
     video_path = video_input
-    if video_input.startswith("http"):
+    
+    # Handle YouTube URL
+    if video_input.startswith(('http://', 'https://')):
         video_path = download_youtube_video(video_input)
         if not video_path:
-            return None, "Could not download video."
+            return None, "Failed to download YouTube video"
+    
     if not os.path.exists(video_path):
-        return None, "Video file missing."
-    if not video_path.lower().endswith(('.mp4', '.mov')):
-        return None, "Only .mp4/.mov supported."
-
+        return None, "Video file not found"
+    
+    # Extract keyframes and process video
     keyframes, key_moments, fps, duration = extract_keyframes(video_path)
     if not keyframes:
-        return None, "Failed to extract keyframes."
-
-    summaries, highlight_frames = [], []
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for idx, frame in keyframes:
-            summary = generate_text_summary(frame, idx, fps, domain, lang)
-            output_path = os.path.join(output_dir, f"keyframe_{len(highlight_frames)+1}.jpg")
-            cv2.imwrite(output_path, frame)
-            summaries.append(summary)
-            highlight_frames.append(output_path)
-
-    storyboard_path = create_storyboard_image(keyframes, key_moments, summaries, output_dir, domain, video_input, duration, fps, lang)
+        return None, "Failed to extract keyframes"
+    
+    # Generate summaries and save keyframes
+    summaries = []
+    highlight_frames = []
+    for idx, frame in keyframes:
+        summary = generate_text_summary(frame, idx, fps, domain, lang)
+        output_path = os.path.join(output_dir, f"keyframe_{len(highlight_frames)+1}.jpg")
+        cv2.imwrite(output_path, frame)
+        summaries.append(summary)
+        highlight_frames.append(output_path)
+    
+    # Create storyboard
+    storyboard_path = create_storyboard_image(
+        keyframes, key_moments, summaries, 
+        output_dir, domain, video_input, 
+        duration, fps, lang
+    )
+    
+    # Generate overall summary
     summary = " ".join(summaries)
+    
     return highlight_frames, summary
 
 @app.route('/')
@@ -359,10 +375,11 @@ def analyze_video_basic():
     task_id = str(uuid.uuid4())
     output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
     os.makedirs(output_dir, exist_ok=True)
+    
     domain = request.form.get('domain', 'generic')
     lang = request.form.get('lang', 'en')
     video_input = None
-
+    
     if 'video' in request.files:
         file = request.files['video']
         if file.filename:
@@ -371,17 +388,23 @@ def analyze_video_basic():
             file.save(video_input)
     elif request.form.get('youtube_url'):
         video_input = request.form.get('youtube_url')
-
+    
     if not video_input:
         return jsonify({'error': 'No video or URL provided'}), 400
-
+    
     keyframes, summary = process_video(video_input, domain, output_dir, lang)
     if not keyframes:
         return jsonify({'error': summary}), 500
-
+    
+    # Read the manifest file
     manifest_path = os.path.join(output_dir, 'storyboard_manifest.json')
     with open(manifest_path, 'r') as f:
         manifest = json.load(f)
+    
+    # Update paths in manifest to be relative to the results directory
+    for kf in manifest['keyframes']:
+        kf['path'] = f"/results/{task_id}/{os.path.basename(kf['path'])}"
+    
     return jsonify({
         'task_id': task_id,
         'keyframes': [f"/results/{task_id}/{os.path.basename(kf)}" for kf in keyframes],
