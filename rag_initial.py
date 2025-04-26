@@ -1,92 +1,185 @@
+import os
+import uuid
+import logging
+import cv2
+import numpy as np
+from flask import Flask, request, render_template, jsonify, send_file
+from werkzeug.utils import secure_filename
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 from youtube_transcript_api import YouTubeTranscriptApi
-from crawl4ai import WebCrawler
-from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
 from sentence_transformers import SentenceTransformer
 import faiss
-import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import google.generativeai as genai
-import re
 import json
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 from graphviz import Digraph
-import os
-import cv2
-from groq import Groq
-import base64
-from io import BytesIO
-from PIL import Image
-import yt_dlp
-from scipy import stats
 from ultralytics import YOLO
+import yt_dlp
+import textwrap
+from langdetect import detect, LangDetectException
+from deep_translator import GoogleTranslator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import subprocess
+import warnings
+import time
 
-# Configuration
-GEMINI_API_KEY = "AIzaSyDq3W6bcmtED-s0vDKmSBZr8uIwy4Gc1Io"
-GROQ_API_KEY = "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"
+# Suppress warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
+# Flask app setup
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['RESULTS_FOLDER'] = 'static/results'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
+
+# Ensure directories exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY not set in .env file")
 genai.configure(api_key=GEMINI_API_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY)
+
+# Supported languages
+SUPPORTED_LANGUAGES = {
+    'en': {'name': 'English', 'font': 'arial.ttf'},
+    'es': {'name': 'Spanish', 'font': 'arial.ttf'},
+    'fr': {'name': 'French', 'font': 'arial.ttf'},
+    'de': {'name': 'German', 'font': 'arial.ttf'},
+    'zh-cn': {'name': 'Chinese (Simplified)', 'font': 'simhei.ttf'},
+    'ja': {'name': 'Japanese', 'font': 'msgothic.ttc'},
+    'ko': {'name': 'Korean', 'font': 'malgun.ttf'},
+    'ar': {'name': 'Arabic', 'font': 'arial.ttf'},
+    'ru': {'name': 'Russian', 'font': 'arial.ttf'},
+    'hi': {'name': 'Hindi', 'font': 'mangal.ttf'},
+    'pt': {'name': 'Portuguese', 'font': 'arial.ttf'},
+    'it': {'name': 'Italian', 'font': 'arial.ttf'}
+}
+
+# Domain descriptors
+DOMAIN_DESCRIPTORS = {
+    'sports': {
+        'focus': ['athletes', 'players', 'competition', 'field', 'court', 'action', 'movement', 'score'],
+        'prompt': 'Analyze this sports video frame focusing on player positions, action moments, and game dynamics. Identify key athletic moments.',
+        'colors': {'primary': (0, 128, 255), 'secondary': (255, 165, 0), 'text': (0, 0, 0)},
+        'icons': ['🏃', '⚽', '⏱️']
+    },
+    'education': {
+        'focus': ['instructor', 'classroom', 'slides', 'demonstration', 'explanation', 'experiment'],
+        'prompt': 'Analyze this educational video frame focusing on key concepts, teaching moments, and visual demonstrations. Identify the main learning points.',
+        'colors': {'primary': (76, 175, 80), 'secondary': (255, 235, 59), 'text': (33, 33, 33)},
+        'icons': ['🏫', '📚', '🔬']
+    },
+    'news': {
+        'focus': ['reporter', 'event', 'scene', 'interview', 'headline', 'location'],
+        'prompt': 'Analyze this news video frame identifying the main event, location, people involved, and key information being reported.',
+        'colors': {'primary': (33, 150, 243), 'secondary': (244, 67, 54), 'text': (0, 0, 0)},
+        'icons': ['🌍', '📅', '👤']
+    },
+    'podcast': {
+        'focus': ['speaker', 'host', 'guest', 'discussion', 'interview', 'conversation'],
+        'prompt': 'Analyze this podcast video frame focusing on the speakers, conversation dynamics, and subject matter being discussed.',
+        'colors': {'primary': (156, 39, 176), 'secondary': (103, 58, 183), 'text': (255, 255, 255)},
+        'icons': ['🎙️', '🎧', '👤']
+    },
+    'surveillance': {
+        'focus': ['motion', 'people', 'vehicles', 'activity', 'anomaly', 'security'],
+        'prompt': 'Analyze this surveillance video frame identifying important activity, movement patterns, and subjects of interest.',
+        'colors': {'primary': (66, 66, 66), 'secondary': (158, 158, 158), 'text': (255, 255, 255)},
+        'icons': ['📹', '👁️', '⚠️']
+    },
+    'generic': {
+        'focus': ['scene', 'action', 'people', 'objects', 'environment', 'mood'],
+        'prompt': 'Analyze this video frame and describe the main elements, activities, and context of the scene.',
+        'colors': {'primary': (0, 150, 136), 'secondary': (255, 193, 7), 'text': (0, 0, 0)},
+        'icons': ['🎥', '🖼️', '🌐']
+    }
+}
 
 # Initialize models
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 dimension = 384
 index = faiss.IndexFlatL2(dimension)
 knowledge_base: List[Dict] = []
-vector_base = []
-crawler = WebCrawler()
-crawler.warmup()
-extraction_strategy = JsonCssExtractionStrategy(
-    schema={"text_content": {"css": "p", "type": "string"}}
-)
 
-# Initialize YOLOv8 model
 try:
-    yolo_model = YOLO("yolov8n.pt")  # Nano model for speed
-    print("YOLOv8 model loaded successfully.")
+    yolo_model = YOLO("yolov11n.pt")
+    print("YOLOv11 model loaded successfully.")
 except Exception as e:
-    print(f"Failed to load YOLOv8 model: {str(e)}. Falling back to vision-based analysis.")
+    print(f"Failed to load YOLOv11 model: {str(e)}. Falling back to vision-based analysis.")
     yolo_model = None
 
-# --- Existing Functions (Unchanged) ---
+# Helper Functions
+def detect_language(text: str) -> str:
+    try:
+        return detect(text)
+    except LangDetectException:
+        return 'en'
+
+def translate_text(text: str, target_lang: str) -> str:
+    if not text:
+        return ""
+    try:
+        detected_lang = detect_language(text)
+        if detected_lang == target_lang:
+            return text
+        translator = GoogleTranslator(source=detected_lang, target=target_lang)
+        return translator.translate(text)
+    except Exception as e:
+        print(f"Translation error: {str(e)}")
+        return text
+
+def get_font_for_language(lang_code: str, size: int = 20) -> ImageFont.FreeTypeFont:
+    font_file = SUPPORTED_LANGUAGES.get(lang_code, {}).get('font', 'arial.ttf')
+    try:
+        return ImageFont.truetype(font_file, size)
+    except IOError:
+        print(f"Font {font_file} not found. Using default.")
+        return ImageFont.truetype('arial.ttf', size)
+
+def check_ffmpeg():
+    try:
+        subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except FileNotFoundError:
+        print("FFmpeg not found. Falling back to single-format download.")
+        return False
+
+# Crawling and Transcript Functions
 def crawl_url(url: str, output_file: str = "crawled_data.json") -> str:
     try:
         options = Options()
         options.add_argument("--headless")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
         driver = webdriver.Chrome(options=options)
         driver.get(url)
         driver.implicitly_wait(5)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         paragraphs = soup.find_all('p')
         text_content = " ".join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump({"url": url, "text": text_content}, f)
-        print(f"Crawled {url} and saved to {output_file}")
         driver.quit()
         return text_content if text_content else None
     except Exception as e:
-        print(f"Error crawling {url} with Selenium: {str(e)}")
-        return None
-
-def crawl_youtube(video_url: str) -> str:
-    try:
-        result = crawler.run(url=video_url, extraction_strategy=extraction_strategy, bypass_cache=True)
-        if result.success and result.extracted_content:
-            return " ".join([item["text_content"] for item in result.extracted_content if "text_content" in item])
-        return None
-    except Exception as e:
-        print(f"Error crawling YouTube {video_url}: {str(e)}")
+        print(f"Error crawling {url}: {str(e)}")
         return None
 
 def get_youtube_transcript(video_url: str) -> str:
-    video_id = video_url.split("v=")[-1].split("&")[0]
     try:
+        video_id = video_url.split("v=")[-1].split("&")[0]
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
         return " ".join([entry["text"] for entry in transcript])
     except Exception as e:
-        print(f"Error fetching transcript for {video_url}: {e}")
+        print(f"Error fetching transcript for {video_url}: {str(e)}")
         return None
 
 def chunk_text(text: str, max_length: int = 500) -> List[str]:
@@ -101,886 +194,750 @@ def update_knowledge_base(text: str, source: str, source_type: str):
     index.add(embeddings)
     for chunk in chunks:
         knowledge_base.append({"text": chunk, "source": source, "type": source_type})
-    vector_base.extend(embeddings)
     print(f"Added {len(chunks)} chunks from {source} ({source_type}) to knowledge base.")
 
-def process_input(source: str, source_type: str = "web"):
-    if source_type == "web":
-        text = crawl_url(source)
-        if text:
-            update_knowledge_base(text, source, "web")
-    elif source_type == "video":
-        page_text = crawl_youtube(source)
-        transcript = get_youtube_transcript(source)
-        text = f"{page_text or ''} {transcript or ''}".strip()
-        if text:
-            update_knowledge_base(text, source, "video")
-    elif source_type == "user":
-        update_knowledge_base(source, "User Input", "text")
-
-def retrieve_chunks(query: str, source: str = None) -> List[str]:
-    query_embedding = embedder.encode([query], convert_to_numpy=True)
-    distances, indices = index.search(query_embedding, k=3)
-    if source:
-        chunks = [kb["text"] for kb in knowledge_base if kb["source"] == source][:3]
-    else:
-        chunks = [knowledge_base[i]["text"] for i in indices[0]]
-    return chunks
-
-def generate_answer(query: str, source: str = None) -> str:
-    context = "\n".join(retrieve_chunks(query, source))
-    prompt = f"""
-    You are an expert educational assistant. Based on the following context, provide a clear, concise, and accurate answer to the question. Use the context provided and avoid speculation beyond it.
-
-    Context: {context}
-    
-    Question: {query}
-    
-    Answer:
-    """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return response.text.strip()
-
-def generate_summary(source: str = None) -> str:
-    if not knowledge_base:
-        return "No content available to summarize."
-    if source:
-        context = "\n".join([kb["text"] for kb in knowledge_base if kb["source"] == source][:3])
-        title = f"Summary for {source}"
-    else:
-        context = "\n".join([kb["text"] for kb in knowledge_base][:3])
-        title = "Summary of All Content"
-    prompt = f"""
-    You are a skilled summarizer. Provide a concise and informative summary of the following content in 2-3 sentences.
-
-    Content: {context}
-    
-    Summary:
-    """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return f"### {title}\n{response.text.strip()}"
-
-def generate_mock_test(topic: str, source: str = None, num_questions: int = 5) -> str:
-    context = "\n".join(retrieve_chunks(topic, source))
-    prompt = f"""
-    You are an educational agent tasked with creating a mock test. Based on the following context, generate a mock test with {num_questions} multiple-choice questions on the topic '{topic}'. Each question should have 4 options (A, B, C, D) and the correct answer clearly marked.
-
-    Context: {context}
-    
-    Mock Test:
-    """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return f"### Mock Test on {topic}\n{response.text.strip()}"
-
-def generate_mind_map(topic: str, source: str = None) -> str:
-    context = "\n".join(retrieve_chunks(topic, source))
-    prompt = f"""
-    You are a learning expert. Based on the following context, create a Graphviz DOT language script for a mind map on the topic '{topic}'. The mind map should have a central node (the topic), main branches, and sub-branches. Keep it concise and structured.
-
-    Context: {context}
-    
-    Graphviz DOT Script:
-    """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    dot_content = response.text.strip()
-
-    print(f"\n### Mind Map DOT Script for {topic}\n{dot_content}")
-    try:
-        confirm = input("Generate mind map image (PNG) from this script? (y/n): ").strip().lower()
-        if confirm == 'y':
-            dot = Digraph(comment=f'Mind Map for {topic}', format='png')
-            if '```dot' in dot_content:
-                dot_content = dot_content.split('```dot')[1].split('```')[0].strip()
-            dot.body.append(dot_content)
-            output_file = f"mind_map_{topic.replace(' ', '_')}"
-            dot.render(output_file, view=True)
-            return f"Generated mind map image: {output_file}.png"
-    except EOFError:
-        print("Input stream closed. Skipping image generation.")
-    return "Image generation skipped."
-
-def generate_flowchart(topic: str, source: str = None) -> str:
-    context = "\n".join(retrieve_chunks(topic, source))
-    prompt = f"""
-    You are a process design expert. Based on the following context, create a Graphviz DOT language script for a flowchart on the topic '{topic}'. The flowchart should represent a sequence of steps or decisions in a logical order. Use shapes like 'box' for steps and 'diamond' for decisions.
-
-    Context: {context}
-    
-    Graphviz DOT Script:
-    """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    dot_content = response.text.strip()
-
-    print(f"\n### Flowchart DOT Script for {topic}\n{dot_content}")
-    try:
-        confirm = input("Generate flowchart image (PNG) from this script? (y/n): ").strip().lower()
-        if confirm == 'y':
-            dot = Digraph(comment=f'Flowchart for {topic}', format='png')
-            if '```dot' in dot_content:
-                dot_content = dot_content.split('```dot')[1].split('```')[0].strip()
-            dot.body.append(dot_content)
-            output_file = f"flowchart_{topic.replace(' ', '_')}"
-            dot.render(output_file, view=True)
-            return f"Generated flowchart image: {output_file}.png"
-    except EOFError:
-        print("Input stream closed. Skipping image generation.")
-    return "Image generation skipped."
-
-# --- Video Analysis Functions ---
+# Video Processing Functions
 def download_youtube_video(url: str, output_dir: str = "temp_videos") -> str:
-    """Download a YouTube video as MP4 using yt-dlp."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
+    timestamp = int(time.time())
+    output_path = os.path.join(output_dir, f"video_{timestamp}.mp4")
+    ffmpeg_available = check_ffmpeg()
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
-        'merge_output_format': 'mp4',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if ffmpeg_available else 'best[ext=mp4]',
+        'outtmpl': output_path,
+        'merge_output_format': 'mp4' if ffmpeg_available else None,
         'quiet': True
     }
-    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            return os.path.join(output_dir, f"video.mp4")
+            ydl.download([url])
+        print(f"Successfully downloaded video from {url}")
+        return output_path
     except Exception as e:
         print(f"Error downloading YouTube video: {str(e)}")
         return None
 
-def frame_to_base64(frame):
-    """Convert OpenCV frame to base64 string for Groq API."""
-    _, buffer = cv2.imencode('.jpg', frame)
-    img = Image.open(BytesIO(buffer))
-    img_byte_arr = BytesIO()
-    img.save(img_byte_arr, format='JPEG')
-    return base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-
-def analyze_frame_with_groq(frame, domain: str) -> Dict:
-    """Analyze a single frame using Groq's LLaMA 3.2 vision model."""
-    base64_image = frame_to_base64(frame)
-    prompt = f"""
-    You are an expert in {domain} video analysis. Analyze this frame from a {domain} video and provide:
-    1. A brief description of the scene (actions, objects, people).
-    2. Significance score (0-100) based on visual activity (motion, scene change, key objects).
-    3. Any visible text in the frame.
-    """
-    if domain == "generic":
-        prompt = """
-        Analyze this frame from a video and provide:
-        1. A brief description of the scene (actions, objects, people).
-        2. Significance score (0-100) based on visual activity (motion, scene change, key objects).
-        3. Any visible text in the frame.
-        """
-    try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]
-                }
-            ],
-            max_tokens=200
-        )
-        result = response.choices[0].message.content
-        lines = result.split('\n')
-        description = lines[0] if lines else "No description"
-        score = int(re.search(r'\d+', lines[1]).group()) if len(lines) > 1 and re.search(r'\d+', lines[1]) else 50
-        text = lines[2] if len(lines) > 2 else ""
-        return {
-            'description': description,
-            'score': score,
-            'text': text
-        }
-    except Exception as e:
-        print(f"Error analyzing frame with Groq: {str(e)}")
-        return {'description': 'Error in analysis', 'score': 50, 'text': ''}
-
-def calculate_motion_score(prev_frame, curr_frame):
-    """Calculate motion intensity between two frames."""
-    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-    curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
-    diff = cv2.absdiff(prev_gray, curr_gray)
-    motion_score = np.mean(diff)
-    return motion_score
-
-def detect_scene_change(prev_frame, curr_frame, threshold=0.7):
-    """Detect scene changes using histogram correlation."""
-    prev_hist = cv2.calcHist([prev_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-    curr_hist = cv2.calcHist([curr_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-    prev_hist = cv2.normalize(prev_hist, prev_hist).flatten()
-    curr_hist = cv2.normalize(curr_hist, curr_hist).flatten()
-    correlation = stats.pearsonr(prev_hist, curr_hist)[0]
-    return correlation < threshold
-
-def generate_domain_specific_output(keyframes, domain: str) -> str:
-    """Generate domain-specific text output using Gemini."""
-    if domain == "generic":
-        return "Generic domain: Visual storyboard generated without domain-specific summary."
-    
-    descriptions = [f"Frame {i+1}: {kf['description']} (Score: {kf['score']}, Text: {kf['text']})" for i, kf in enumerate(keyframes)]
-    prompt = f"""
-    You are an expert in {domain} analysis. Based on the following key moments from a {domain} video, generate a concise summary or commentary. Include relevant details like actions, events, or text visible in the frames.
-
-    Key Moments: {descriptions}
-
-    Output:
-    """
-    if domain == "sports":
-        prompt += "\nGenerate sports commentary and predict the likely winner if applicable."
-    elif domain == "podcast":
-        prompt += "\nSummarize key discussion points or topics."
-    elif domain == "news":
-        prompt += "\nExtract key headlines or events."
-    elif domain == "education":
-        prompt += "\nIdentify key concepts or topics taught."
-    elif domain == "surveillance":
-        prompt += "\nFlag significant events (e.g., person entry/exit, unusual objects)."
-
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return f"### {domain.capitalize()} Summary\n{response.text.strip()}"
-
-def process_video(video_input: str, domain: str, output_dir: str = "storyboard", max_frames: int = 5) -> tuple:
-    """Process a video file or YouTube link and generate storyboard and text output."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Handle YouTube links
-    video_path = video_input
-    if video_input.startswith("http") and ("youtube.com" in video_input or "youtu.be" in video_input):
-        video_path = download_youtube_video(video_input)
-        if not video_path:
-            return None, "Error: Could not download YouTube video."
-    
-    # Validate local file
-    if not video_path.startswith("http") and not os.path.exists(video_path):
-        return None, "Error: Video file does not exist."
-    if not video_path.lower().endswith(('.mp4', '.mov')):
-        return None, "Error: Only .mp4 and .mov files are supported."
-    
+def extract_keyframes(video_path, max_frames=None):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        return None, "Error: Could not open video."
+        raise ValueError("Could not open video file.")
     
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
-    segment_duration = 1.0
-    frames_per_segment = int(fps * segment_duration)
+    duration = frame_count / fps if fps > 0 else 0
     
-    segments = []
+    if max_frames is None:
+        max_frames = min(max(10, int(duration / 10)), 50)
+    
+    print(f"Video info: {frame_count} frames, {fps:.2f} FPS, {duration:.2f} seconds, targeting {max_frames} keyframes")
+    
+    sample_rate = max(1, frame_count // 1000) if frame_count > 10000 else 1
     prev_frame = None
+    scores = []
     frame_idx = 0
+    processed = 0
     
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        if frame_idx % frames_per_segment == 0:
-            segment_score = 0
-            segment_frame = frame.copy()
-            
-            # Analyze frame with Groq's LLaMA vision model
-            analysis = analyze_frame_with_groq(frame, domain)
-            segment_score += analysis['score'] * 0.5
-            
-            # Supplement with motion and scene change detection
-            if prev_frame is not None:
-                motion_score = calculate_motion_score(prev_frame, frame)
-                segment_score += motion_score * 0.3
-                
-                if detect_scene_change(prev_frame, frame):
-                    segment_score += 100 * 0.2
-            
-            segments.append({
-                'frame_idx': frame_idx,
-                'score': segment_score,
-                'frame': segment_frame,
-                'description': analysis['description'],
-                'text': analysis['text']
-            })
-        
-        prev_frame = frame.copy()
-        frame_idx += 1
+    def process_frame(frame_idx, frame):
+        if prev_frame is not None and frame.shape == prev_frame.shape:
+            diff = np.mean((frame.astype(float) - prev_frame.astype(float)) ** 2)
+            return frame_idx, diff, frame.copy()
+        return None
     
-    cap.release()
-    
-    # Clean up downloaded YouTube video
-    if video_path != video_input and os.path.exists(video_path):
-        os.remove(video_path)
-    
-    segments = sorted(segments, key=lambda x: x['score'], reverse=True)
-    top_segments = segments[:max_frames]
-    
-    for i, segment in enumerate(top_segments):
-        output_path = os.path.join(output_dir, f"keyframe_{i+1}.jpg")
-        cv2.imwrite(output_path, segment['frame'])
-        print(f"Saved keyframe {i+1} at frame {segment['frame_idx']} with score {segment['score']:.2f}")
-    
-    text_output = generate_domain_specific_output(top_segments, domain)
-    return [os.path.join(output_dir, f"keyframe_{i+1}.jpg") for i in range(len(top_segments))], text_output
-
-def detect_objects(frame, confidence_threshold=0.5):
-    """Detect objects and people in a frame using YOLOv8."""
-    if yolo_model is None:
-        print("YOLOv8 model not available. Skipping object detection.")
-        return frame, []
-    
-    try:
-        # Run YOLOv8 inference
-        results = yolo_model(frame, conf=confidence_threshold, imgsz=640, verbose=False)
-        
-        # Process results
-        annotated_frame = frame.copy()
-        detected_objects = []
-        
-        for result in results:
-            boxes = result.boxes
-            for box in boxes:
-                x, y, w, h = box.xywh[0].cpu().numpy()
-                x, y = int(x - w/2), int(y - h/2)
-                w, h = int(w), int(h)
-                confidence = float(box.conf.cpu().numpy())
-                class_id = int(box.cls.cpu().numpy())
-                label = yolo_model.names[class_id]
-                
-                # Draw bounding box and label
-                color = (0, 255, 0)
-                cv2.rectangle(annotated_frame, (x, y), (x + w, y + h), color, 2)
-                cv2.putText(annotated_frame, f"{label} {confidence:.2f}", (x, y - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                
-                detected_objects.append({
-                    "class": label,
-                    "confidence": confidence,
-                    "box": [x, y, w, h]
-                })
-        
-        return annotated_frame, detected_objects
-    except Exception as e:
-        print(f"YOLOv8 object detection failed: {str(e)}. Falling back to vision-based analysis.")
-        return frame, []
-
-def analyze_motion_patterns(frames, sample_rate=5):
-    """Analyze motion patterns across multiple frames."""
-    if len(frames) < 2:
-        return [], 0
-    
-    # Initialize optical flow parameters
-    feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
-    lk_params = dict(winSize=(15, 15), maxLevel=2,
-                     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-    
-    # Convert first frame to grayscale
-    old_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
-    
-    # Find initial points to track
-    p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **feature_params)
-    if p0 is None:
-        return [], 0
-    
-    # Create mask for drawing
-    mask = np.zeros_like(frames[0])
-    
-    # Motion vectors
-    motion_vectors = []
-    total_motion = 0
-    
-    # Process frames
-    for i in range(1, len(frames), sample_rate):
-        if i >= len(frames):
-            break
-            
-        frame = frames[i]
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate optical flow
-        p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
-        
-        # Select good points
-        if p1 is not None:
-            good_new = p1[st==1]
-            good_old = p0[st==1]
-            
-            # Calculate motion vectors
-            frame_vectors = []
-            for j, (new, old) in enumerate(zip(good_new, good_old)):
-                a, b = new.ravel()
-                c, d = old.ravel()
-                vector = (a-c, b-d)
-                magnitude = np.sqrt((a-c)**2 + (b-d)**2)
-                total_motion += magnitude
-                frame_vectors.append((vector, magnitude))
-                
-                # Draw the tracks
-                mask = cv2.line(mask, (int(a), int(b)), (int(c), int(d)), (0, 255, 0), 2)
-                frame = cv2.circle(frame, (int(a), int(b)), 5, (0, 0, 255), -1)
-            
-            motion_vectors.append(frame_vectors)
-            
-            # Update points
-            if len(good_new) > 10:
-                p0 = good_new.reshape(-1, 1, 2)
-                old_gray = frame_gray.copy()
-            else:
-                # Reset points if too few remain
-                p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **feature_params)
-                old_gray = frame_gray.copy()
-    
-    # Calculate average motion
-    avg_motion = total_motion / len(frames) if frames else 0
-    
-    return motion_vectors, avg_motion
-
-def process_video_enhanced(video_input: str, domain: str, output_dir: str = "storyboard", max_frames: int = 10) -> tuple:
-    """Process a video file or YouTube link with enhanced object detection and motion analysis, optimized for long videos."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Handle YouTube links
-    video_path = video_input
-    if video_input.startswith("http") and ("youtube.com" in video_input or "youtu.be" in video_input):
-        video_path = download_youtube_video(video_input)
-        if not video_path:
-            return None, "Error: Could not download YouTube video."
-    
-    # Validate local file
-    if not video_path.startswith("http") and not os.path.exists(video_path):
-        return None, "Error: Video file does not exist."
-    if not video_path.lower().endswith(('.mp4', '.mov')):
-        return None, "Error: Only .mp4 and .mov files are supported."
-    
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None, "Error: Could not open video."
-    
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    duration = frame_count / fps
-    
-    print(f"Video info: {frame_count} frames, {fps} FPS, {duration:.2f} seconds")
-    
-    # Optimize for long videos
-    min_sampling_rate = 10  # Sample every 10th frame for very long videos
-    max_sampling_rate = 30  # Maximum sampling rate for extremely long videos
-    target_samples = 1000   # Target number of samples to process
-    sampling_rate = max(min_sampling_rate, min(max_sampling_rate, int(frame_count / target_samples)))
-    segment_duration = 10.0  # Analyze segments every 10 seconds for long videos
-    frames_per_segment = int(fps * segment_duration)
-    
-    segments = []
-    frames_buffer = []
-    prev_frame = None
-    frame_idx = 0
-    
-    print("Analyzing video for key moments...")
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Store frame for motion analysis
-        if frame_idx % sampling_rate == 0:
-            frames_buffer.append(frame.copy())
-        
-        if frame_idx % frames_per_segment == 0:
-            segment_score = 0
-            segment_frame = frame.copy()
-            
-            # Object detection with YOLOv8
-            try:
-                annotated_frame, detected_objects = detect_objects(frame)
-                person_count = sum(1 for obj in detected_objects if obj["class"] == "person")
-                unique_objects = set(obj["class"] for obj in detected_objects)
-                object_score = min(100, len(detected_objects) * 10 + person_count * 15)
-            except Exception as e:
-                print(f"Object detection failed at frame {frame_idx}: {str(e)}")
-                annotated_frame = frame
-                detected_objects = []
-                person_count = 0
-                object_score = 0
-            
-            # Analyze with Groq's LLaMA vision model
-            analysis = analyze_frame_with_groq(frame, domain)
-            llm_score = analysis['score'] * 0.5
-            
-            # Motion analysis
-            if len(frames_buffer) > 5:
-                motion_vectors, avg_motion = analyze_motion_patterns(frames_buffer[-5:])
-                motion_score = min(100, avg_motion * 10) * 0.3
-            else:
-                motion_score = 0
-            
-            # Scene change detection
-            scene_change_score = 0
-            if prev_frame is not None:
-                if detect_scene_change(prev_frame, frame):
-                    scene_change_score = 100 * 0.2
-            
-            # Combined score
-            segment_score = llm_score + object_score * 0.1 + motion_score + scene_change_score
-            
-            segments.append({
-                'frame_idx': frame_idx,
-                'score': segment_score,
-                'frame': annotated_frame,
-                'description': analysis['description'],
-                'text': analysis['text'],
-                'objects': [obj["class"] for obj in detected_objects],
-                'person_count': person_count
-            })
-            
-            # Progress indicator for long videos
-            if frame_count > 1000 and frame_idx % (frames_per_segment * 10) == 0:
-                print(f"Processing: {frame_idx}/{frame_count} frames ({frame_idx/frame_count*100:.1f}%)")
-        
-        prev_frame = frame.copy()
-        frame_idx += 1
-        
-        # Limit buffer size to prevent memory issues
-        if len(frames_buffer) > 50:
-            frames_buffer.pop(0)
-    
-    cap.release()
-    
-    # Clean up downloaded YouTube video
-    if video_path != video_input and os.path.exists(video_path):
-        os.remove(video_path)
-    
-    if not segments:
-        return None, "Error: No significant segments detected in the video."
-    
-    segments = sorted(segments, key=lambda x: x['score'], reverse=True)
-    top_segments = segments[:max_frames]
-    
-    # Save keyframes and create storyboard
-    highlight_frames = []
-    for i, segment in enumerate(top_segments):
-        output_path = os.path.join(output_dir, f"keyframe_{i+1}.jpg")
-        cv2.imwrite(output_path, segment['frame'])
-        highlight_frames.append(output_path)
-        
-        print(f"Saved keyframe {i+1} at frame {segment['frame_idx']} with score {segment['score']:.2f}")
-        print(f"  - Objects: {', '.join(segment['objects']) if segment['objects'] else 'None'}")
-        print(f"  - People: {segment['person_count']}")
-        print(f"  - Description: {segment['description']}")
-    
-    # Generate content analysis
-    text_output = generate_domain_specific_output(top_segments, domain)
-    
-    # Create side-by-side storyboard image
-    if len(highlight_frames) > 1:
-        storyboard_path = os.path.join(output_dir, "storyboard.jpg")
-        storyboard_images = [cv2.imread(frame) for frame in highlight_frames]
-        
-        # Resize to common height
-        height = 300
-        resized_images = []
-        for img in storyboard_images:
-            if img is None:
-                continue
-            h, w = img.shape[:2]
-            ratio = height / h
-            resized = cv2.resize(img, (int(w * ratio), height))
-            resized_images.append(resized)
-        
-        if resized_images:
-            # Concatenate horizontally
-            storyboard = cv2.hconcat(resized_images)
-            cv2.imwrite(storyboard_path, storyboard)
-            print(f"Created storyboard image: {storyboard_path}")
-    
-    # Create highlight reel
-    highlight_reel_path = create_highlight_reel(video_input, highlight_frames)
-    if highlight_reel_path:
-        text_output += f"\n\nCreated highlight reel: {highlight_reel_path}"
-    
-    return highlight_frames, text_output
-
-def create_highlight_reel(video_input: str, keyframes: list, output_file: str = "storyboard/highlight_reel.mp4"):
-    """Create a highlight reel video from the keyframes."""
-    if not keyframes:
-        return None, "Error: No keyframes provided."
-    
-    # Ensure output directory exists
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Extract keyframe numbers from filenames
-    frame_indices = []
-    for kf in keyframes:
-        match = re.search(r'keyframe_(\d+)', os.path.basename(kf))
-        if match:
-            frame_idx = int(match.group(1)) - 1
-            frame_indices.append(frame_idx)
-    
-    # Handle YouTube links
-    video_path = video_input
-    if video_input.startswith("http") and ("youtube.com" in video_input or "youtu.be" in video_input):
-        video_path = download_youtube_video(video_input)
-        if not video_path:
-            return None, "Error: Could not download YouTube video."
-    
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None, "Error: Could not open video."
-    
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    # Create video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_file, fourcc, fps, (width, height))
-    
-    # Extract 5-second clips around each keyframe for long videos
-    seconds_before = 2.5
-    seconds_after = 2.5
-    frames_before = int(fps * seconds_before)
-    frames_after = int(fps * seconds_after)
-    
-    for segment_idx, frame_idx in enumerate(frame_indices):
-        # Calculate start and end frames
-        start_frame = max(0, frame_idx - frames_before)
-        end_frame = min(frame_count - 1, frame_idx + frames_after)
-        
-        # Set video position to start frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        
-        # Extract and write frames
-        for _ in range(end_frame - start_frame + 1):
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = []
+        while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Add segment indicator text
-            cv2.putText(frame, f"Segment {segment_idx+1}", (30, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            out.write(frame)
+            if frame_idx % sample_rate == 0:
+                futures.append(executor.submit(process_frame, frame_idx, frame))
+                processed += 1
+            prev_frame = frame.copy()
+            frame_idx += 1
+    
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                scores.append(result)
     
     cap.release()
-    out.release()
     
-    # Clean up downloaded YouTube video
-    if video_path != video_input and os.path.exists(video_path):
-        os.remove(video_path)
+    scores.sort(key=lambda x: x[1], reverse=True)
+    keyframes = [(s[0], s[2]) for s in scores[:max_frames]]
+    keyframes.sort(key=lambda x: x[0])
     
-    return output_file
+    key_moments = [(s[0], s[2]) for s in scores[:min(5, len(scores))]]
+    key_moments.sort(key=lambda x: x[0])
+    
+    return keyframes, key_moments, fps, duration
 
-def process_live_stream(source: str, domain: str, output_dir: str = "live_storyboard", max_frames: int = 5, window_duration: int = 10) -> None:
-    """Process a live video stream and generate real-time storyboards."""
+def generate_text_summary(frame, frame_idx, fps, domain, lang='en'):
+    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    objects_in_frame = []
+    if yolo_model:
+        try:
+            results = yolo_model(frame, conf=0.5, verbose=False)
+            for result in results:
+                for box in result.boxes:
+                    class_id = int(box.cls.cpu().numpy().item())
+                    label = yolo_model.names[class_id]
+                    objects_in_frame.append(label)
+        except Exception as e:
+            print(f"YOLO detection error: {str(e)}")
+    
+    domain_prompt = domain_info['prompt']
+    focus_areas = ', '.join(domain_info['focus'])
+    objects_text = ", ".join(objects_in_frame) if objects_in_frame else "no recognized objects"
+    
+    prompt = f"""
+    {domain_prompt}
+    
+    Time in video: {frame_idx/fps:.2f} seconds
+    Domain: {domain}
+    Focus areas: {focus_areas}
+    Objects detected: {objects_text}
+    
+    Provide a concise 1-2 sentence description of this frame.
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
+        if lang != 'en':
+            summary = translate_text(summary, lang)
+        return summary
+    except Exception as e:
+        print(f"Error generating summary: {str(e)}")
+        return f"Scene at {frame_idx/fps:.2f}s in {domain} video."
+
+def generate_mock_test(text: str, domain: str, lang: str = 'en') -> str:
+    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    prompt = f"""
+    Based on the following {domain} content, generate a mock test with 5 multiple-choice questions, each with 4 options and one correct answer.
+
+    Content: {text[:2000]}
+
+    Focus areas: {', '.join(domain_info['focus'])}
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        result = response.text.strip()
+        if lang != 'en':
+            result = translate_text(result, lang)
+        return result
+    except Exception as e:
+        print(f"Error generating mock test: {str(e)}")
+        return "Unable to generate mock test."
+
+def generate_mind_map(text: str, domain: str, output_dir: str, lang: str = 'en') -> str:
+    DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    prompt = f"""
+    Create a textual representation of a mind map based on the following {domain} content. Structure it as a central topic with 3-5 main branches, each with 2-3 sub-branches. Use bullet points for clarity.
+
+    Content: {text[:2000]}
+
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        mind_map = response.text.strip()
+        if lang != 'en':
+            mind_map = translate_text(mind_map, lang)
+        
+        output_path = os.path.join(output_dir, 'mind_map.txt')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(mind_map)
+        return output_path
+    except Exception as e:
+        print(f"Error generating mind map: {str(e)}")
+        return None
+
+def generate_flowchart(text: str, domain: str, output_dir: str, lang: str = 'en') -> str:
+    DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    prompt = f"""
+    Based on the following {domain} content, generate a flowchart description in DOT format for Graphviz. The flowchart should represent the main process or sequence of events with 5-7 nodes and appropriate connections.
+
+    Content: {text[:2000]}
+
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        dot_content = response.text.strip()
+        if lang != 'en':
+            dot_content = translate_text(dot_content, lang)
+        
+        dot = Digraph(comment='Flowchart')
+        lines = dot_content.split('\n')
+        for line in lines:
+            if '->' in line:
+                parts = line.split('->')
+                if len(parts) == 2:
+                    dot.edge(parts[0].strip(), parts[1].strip())
+            elif line.strip():
+                dot.node(line.strip())
+        
+        output_path = os.path.join(output_dir, 'flowchart.svg')
+        dot.render(output_path, format='svg', cleanup=True)
+        return output_path
+    except Exception as e:
+        print(f"Error generating flowchart: {str(e)}")
+        return None
+
+def create_rounded_corners(image, radius=20):
+    mask = Image.new('L', image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((0, 0, image.size[0], image.size[1]), radius=radius, fill=255)
+    rounded = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    rounded.paste(image, (0, 0), mask)
+    return rounded
+
+def create_storyboard_image(keyframes, key_moments, summaries, output_dir, domain, video_input, duration, fps, lang='en'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        print("Error: Could not open video stream.")
-        return
+    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    primary_color = domain_info['colors']['primary']
+    secondary_color = domain_info['colors']['secondary']
+    text_color = domain_info['colors']['text']
     
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    window_frames = int(fps * window_duration)
-    segments = []
-    prev_frame = None
-    frame_idx = 0
-    window_start = 0
+    num_images = len(keyframes)
+    cols = min(3, num_images)
+    rows = (num_images + cols - 1) // cols
+    cell_width, cell_height = 400, 300
+    margin = 40
+    text_height = 160
+    title_height = 120
+    progress_height = 25
     
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        if frame_idx % int(fps) == 0:
-            segment_score = 0
-            segment_frame = frame.copy()
-            
-            # Analyze frame with Groq's LLaMA vision model
-            analysis = analyze_frame_with_groq(frame, domain)
-            segment_score += analysis['score'] * 0.5
-            
-            if prev_frame is not None:
-                motion_score = calculate_motion_score(prev_frame, frame)
-                segment_score += motion_score * 0.3
-                
-                if detect_scene_change(prev_frame, frame):
-                    segment_score += 100 * 0.2
-            
-            segments.append({
-                'frame_idx': frame_idx,
-                'score': segment_score,
-                'frame': segment_frame,
-                'description': analysis['description'],
-                'text': analysis['text']
-            })
-        
-        prev_frame = frame.copy()
-        frame_idx += 1
-        
-        if frame_idx - window_start >= window_frames:
-            top_segments = sorted(segments, key=lambda x: x['score'], reverse=True)[:max_frames]
-            for i, segment in enumerate(top_segments):
-                output_path = os.path.join(output_dir, f"keyframe_window_{window_start//window_frames}_{i+1}.jpg")
-                cv2.imwrite(output_path, segment['frame'])
-                print(f"Saved keyframe {i+1} for window {window_start//window_frames} at frame {segment['frame_idx']}")
-            
-            text_output = generate_domain_specific_output(top_segments, domain)
-            print(f"\n### Live Stream {domain.capitalize()} Summary (Window {window_start//window_frames})\n{text_output}")
-            
-            segments = []
-            window_start = frame_idx
+    bg_color = tuple(c//3 for c in primary_color)
+    total_width = cols * (cell_width + margin) + margin
+    total_height = rows * (cell_height + text_height + progress_height + margin) + margin + title_height
+    storyboard = Image.new('RGBA', (total_width, total_height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(storyboard)
     
-    cap.release()
+    bg = Image.new('RGB', (total_width, total_height), (255, 255, 255))
+    for y in range(total_height):
+        r = int(255 - (255 - bg_color[0]) * y / total_height)
+        g = int(255 - (255 - bg_color[1]) * y / total_height)
+        b = int(255 - (255 - bg_color[2]) * y / total_height)
+        for x in range(total_width):
+            bg.putpixel((x, y), (r, g, b))
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=10))
+    storyboard.paste(bg, (0, 0))
+    
+    try:
+        font = get_font_for_language(lang, 20)
+        title_font = get_font_for_language(lang, 32)
+    except Exception:
+        font = ImageFont.truetype('arial.ttf', 20)
+        title_font = ImageFont.truetype('arial.ttf', 32)
+    
+    video_name = os.path.basename(video_input) if not video_input.startswith("http") else video_input.split("?")[0][-20:]
+    if len(video_name) > 50:
+        video_name = video_name[:47] + "..."
+    
+    domain_name = domain.capitalize()
+    if lang != 'en':
+        domain_name = translate_text(domain_name, lang)
+    
+    title = f"{SUPPORTED_LANGUAGES.get(lang, {}).get('name', 'Multilingual')} Storyboard: {domain_name} - {video_name}"
+    draw.rectangle([0, 0, total_width, title_height + margin], fill=(*primary_color, 180), outline=(255, 255, 255, 200))
+    title_bbox = draw.textbbox((0, 0), title, font=title_font)
+    title_width = title_bbox[2] - title_bbox[0]
+    draw.text(((total_width - title_width) // 2, margin), title, fill='white', font=title_font)
+    
+    manifest = {
+        'keyframes': [],
+        'key_moments': [],
+        'domain': domain,
+        'video_name': video_name,
+        'language': lang,
+        'duration': duration,
+        'cols': cols,
+        'rows': rows,
+        'cell_width': cell_width,
+        'cell_height': cell_height
+    }
+    
+    for i, (frame_idx, frame) in enumerate(keyframes):
+        summary = summaries[i]
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame_rgb)
+        img = img.resize((cell_width, cell_height), Image.LANCZOS)
+        img = create_rounded_corners(img, radius=20)
+        
+        glow = img.filter(ImageFilter.GaussianBlur(radius=5))
+        glow = ImageEnhance.Brightness(glow).enhance(1.5)
+        glow = ImageEnhance.Color(glow).enhance(0.8)
+        
+        shadow = Image.new('RGBA', (cell_width + 12, cell_height + 12), (0, 0, 0, 80))
+        x = margin + (i % cols) * (cell_width + margin) - 6
+        y = margin + title_height + (i // cols) * (cell_height + text_height + progress_height + margin) - 6
+        storyboard.paste(shadow, (x, y), shadow)
+        storyboard.paste(glow, (x + 6, y + 6), glow)
+        
+        border_color = secondary_color
+        border_img = Image.new('RGBA', (cell_width + 4, cell_height + 4), (*border_color, 200))
+        border_img.paste(img, (2, 2), img)
+        storyboard.paste(border_img, (x + 6, y + 6), border_img)
+        
+        progress_y = y + cell_height + 10
+        progress_width = int(cell_width * (frame_idx / (fps * duration)))
+        draw.rectangle([x + 6, progress_y, x + 6 + progress_width, progress_y + progress_height], fill=(*secondary_color, 220))
+        draw.rectangle([x + 6, progress_y, x + 6 + cell_width, progress_y + progress_height], fill=(200, 200, 200, 100), outline=(*primary_color, 200))
+        
+        text_y = progress_y + progress_height + 15
+        text_x = x + 6
+        timestamp = f"Time: {frame_idx/fps:.1f}s"
+        if lang != 'en':
+            timestamp = translate_text(timestamp, lang)
+        
+        draw.text((text_x, text_y), timestamp, fill=text_color, font=font)
+        
+        wrapped_summary = textwrap.fill(summary, width=40)
+        draw.text((text_x, text_y + 35), wrapped_summary, fill=text_color, font=font)
+        
+        icon_text = domain_info['icons'][min(i, len(domain_info['icons'])-1)]
+        draw.text((text_x + cell_width - 50, y + 15), icon_text, fill='white', font=font)
+        
+        manifest['keyframes'].append({
+            'index': i,
+            'frame_idx': frame_idx,
+            'timestamp': frame_idx/fps,
+            'summary': summary,
+            'icon': icon_text,
+            'x': x + 6,
+            'y': y + 6,
+            'z': -i * 10,
+            'path': f"keyframe_{i+1}.jpg",
+            'is_key_moment': frame_idx in [km[0] for km in key_moments]
+        })
+    
+    for i, (frame_idx, _) in enumerate(key_moments):
+        manifest['key_moments'].append({
+            'index': i,
+            'frame_idx': frame_idx,
+            'timestamp': frame_idx/fps,
+            'summary': summaries[keyframes.index((frame_idx, keyframes[[kf[0] for kf in keyframes].index(frame_idx)][1]))],
+            'path': f"keyframe_{[kf[0] for kf in keyframes].index(frame_idx)+1}.jpg"
+        })
+    
+    output_path = os.path.join(output_dir, 'storyboard.jpg')
+    storyboard.save(output_path, quality=95)
+    
+    manifest_path = os.path.join(output_dir, 'storyboard_manifest.json')
+    with open(manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(manifest, f, ensure_ascii=False)
+    
+    return output_path
 
-# --- Main Function with EOFError Handling ---
-def main():
-    print("=== Welcome to KnowledgeForge: AI-Powered Learning & Video Analysis with YOLOv8 ===")
-    while True:
-        print("\nOptions:")
-        print("1. Add web content")
-        print("2. Add YouTube video (text/transcript)")
-        print("3. Add text")
-        print("4. Ask a question")
-        print("5. Get text summary")
-        print("6. Generate mock test")
-        print("7. Generate mind map")
-        print("8. Generate flowchart")
-        print("9. Analyze video (basic)")
-        print("10. Process live stream")
-        print("11. Analyze video (enhanced with YOLOv8)")
-        print("12. Create highlight reel from analyzed video")
-        print("13. Exit")
+def process_video_basic(video_input: str, domain: str, output_dir: str, lang: str = 'en') -> Tuple[Optional[List[str]], str]:
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    video_path = video_input
+    if video_input.startswith("http") and ("youtube.com" in video_input or "youtu.be" in video_input):
+        video_path = download_youtube_video(video_input)
+        if not video_path:
+            return None, "Error: Could not download YouTube video."
+    
+    if not video_path.startswith("http") and not os.path.exists(video_path):
+        return None, "Error: Video file does not exist."
+    if not video_path.lower().endswith(('.mp4', '.mov')):
+        return None, "Error: Only .mp4 and .mov files are supported."
+    
+    try:
+        keyframes, key_moments, fps, duration = extract_keyframes(video_path)
+    except Exception as e:
+        print(f"Keyframe extraction failed: {str(e)}")
+        return None, "Error: Keyframe extraction failed."
+    
+    summaries = []
+    highlight_frames = []
+    
+    def process_keyframe(frame_idx, frame):
+        summary = generate_text_summary(frame, frame_idx, fps, domain, lang)
+        output_path = os.path.join(output_dir, f"keyframe_{len(highlight_frames)+1}.jpg")
+        cv2.imwrite(output_path, frame)
+        return frame_idx, frame, summary, output_path
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_keyframe = {executor.submit(process_keyframe, idx, frame): (idx, frame) for idx, frame in keyframes}
+        for future in as_completed(future_to_keyframe):
+            frame_idx, frame, summary, output_path = future.result()
+            summaries.append(summary)
+            highlight_frames.append(output_path)
+    
+    if highlight_frames:
+        storyboard_path = create_storyboard_image(keyframes, key_moments, summaries, output_dir, domain, video_input, duration, fps, lang)
+    
+    text_output = generate_domain_specific_output(
+        [{'description': s, 'score': 50, 'text': ''} for s in summaries], domain
+    )
+    
+    faiss.write_index(index, os.path.join(output_dir, "faiss_index.bin"))
+    with open(os.path.join(output_dir, "knowledge_base.json"), 'w', encoding='utf-8') as f:
+        json.dump(knowledge_base, f, ensure_ascii=False)
+    
+    return highlight_frames, text_output
+
+def process_video_enhanced(video_input: str, domain: str, output_dir: str, lang: str = 'en') -> Tuple[Optional[List[str]], str]:
+    return process_video_basic(video_input, domain, output_dir, lang)
+
+def process_live_stream(url: str, domain: str, output_dir: str, lang: str = 'en') -> str:
+    print(f"Live stream processing not implemented for {url}")
+    return "Live stream processing is not currently supported."
+
+def generate_domain_specific_output(segments, domain):
+    domain_info = DOMAIN_DESCRIPTORS.get(domain, DOMAIN_DESCRIPTORS['generic'])
+    summaries = [s.get('description', '') for s in segments]
+    combined_summary = ' '.join(summaries)
+    
+    prompt = f"""
+    You are analyzing a {domain} video. Based on these key moment descriptions, create a comprehensive summary:
+    
+    Key moments: {combined_summary}
+    
+    Focus areas for {domain} videos: {', '.join(domain_info['focus'])}
+    
+    Provide:
+    1. An overall summary (2-3 sentences)
+    2. Key highlights (3-4 bullet points)
+    3. Main takeaways for this {domain} content
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Error generating domain-specific output: {str(e)}")
+        return f"Summary of {domain} video: " + ' '.join(summaries[:2])
+
+# Flask Routes
+@app.route('/')
+def index():
+    return render_template(
+        'index.html',
+        domains=DOMAIN_DESCRIPTORS.keys(),
+        languages=SUPPORTED_LANGUAGES.keys(),
+        supported_languages=SUPPORTED_LANGUAGES
+    )
+
+@app.route('/add_web', methods=['POST'])
+def add_web():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    web_url = data.get('web_url')
+    lang = data.get('lang', 'en')
+    
+    if not web_url or not web_url.startswith('http'):
+        return jsonify({'error': 'Invalid URL'}), 400
+    
+    text = crawl_url(web_url, os.path.join(output_dir, 'web_content.json'))
+    if text:
+        update_knowledge_base(text, web_url, "web")
+        return jsonify({'task_id': task_id, 'content': text})
+    return jsonify({'error': 'Failed to crawl web content'}), 500
+
+@app.route('/add_youtube', methods=['POST'])
+def add_youtube():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    youtube_url = data.get('youtube_url')
+    lang = data.get('lang', 'en')
+    
+    if not youtube_url or not youtube_url.startswith('http'):
+        return jsonify({'error': 'Invalid YouTube URL'}), 400
+    
+    transcript = get_youtube_transcript(youtube_url)
+    if transcript:
+        update_knowledge_base(transcript, youtube_url, "video")
+        return jsonify({'task_id': task_id, 'content': transcript})
+    return jsonify({'error': 'Failed to extract YouTube content'}), 500
+
+@app.route('/add_text', methods=['POST'])
+def add_text():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    text = data.get('text')
+    lang = data.get('lang', 'en')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    update_knowledge_base(text, "user_input", "text")
+    output_path = os.path.join(output_dir, 'user_text.txt')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return jsonify({'task_id': task_id, 'content': text})
+
+@app.route('/ask_question', methods=['POST'])
+def ask_question():
+    data = request.get_json()
+    question = data.get('question')
+    lang = data.get('lang', 'en')
+    
+    if not question:
+        return jsonify({'error': 'No question provided'}), 400
+    
+    embeddings = embedder.encode([question], convert_to_numpy=True)
+    _, indices = index.search(embeddings, k=5)
+    context = "\n".join([knowledge_base[i]['text'] for i in indices[0] if i < len(knowledge_base)])
+    
+    prompt = f"""
+    Based on the following context, answer the question concisely:
+
+    Context: {context}
+
+    Question: {question}
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        answer = response.text.strip()
+        if lang != 'en':
+            answer = translate_text(answer, lang)
+        return jsonify({'answer': answer})
+    except Exception as e:
+        print(f"Error answering question: {str(e)}")
+        return jsonify({'error': 'Failed to generate answer'}), 500
+
+@app.route('/get_summary', methods=['POST'])
+def get_summary():
+    data = request.get_json()
+    text = data.get('text')
+    lang = data.get('lang', 'en')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    prompt = f"""
+    Summarize the following text in 2-3 sentences:
+
+    {text[:2000]}
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
+        if lang != 'en':
+            summary = translate_text(summary, lang)
+        return jsonify({'summary': summary})
+    except Exception as e:
+        print(f"Error generating summary: {str(e)}")
+        return jsonify({'error': 'Failed to generate summary'}), 500
+
+@app.route('/generate_mock_test', methods=['POST'])
+def generate_mock_test_route():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    text = data.get('text')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    mock_test = generate_mock_test(text, domain, lang)
+    output_path = os.path.join(output_dir, 'mock_test.txt')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(mock_test)
+    return jsonify({'task_id': task_id, 'mock_test': mock_test})
+
+@app.route('/generate_mind_map', methods=['POST'])
+def generate_mind_map_route():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    text = data.get('text')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    output_path = generate_mind_map(text, domain, output_dir, lang)
+    if output_path:
+        return jsonify({'task_id': task_id, 'mind_map': output_path})
+    return jsonify({'error': 'Failed to generate mind map'}), 500
+
+@app.route('/generate_flowchart', methods=['POST'])
+def generate_flowchart_route():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    text = data.get('text')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    output_path = generate_flowchart(text, domain, output_dir, lang)
+    if output_path:
+        return jsonify({'task_id': task_id, 'flowchart': output_path})
+    return jsonify({'error': 'Failed to generate flowchart'}), 500
+
+@app.route('/analyze_video_basic', methods=['POST'])
+def analyze_video_basic():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if 'video' in request.files:
+        domain = request.form.get('domain', 'generic')
+        lang = request.form.get('lang', 'en')
+        
+        file = request.files['video']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        filename = secure_filename(file.filename)
+        video_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{task_id}_{filename}")
+        file.save(video_path)
+        
         try:
-            action = input("Choose an option (1-13): ").strip()
-        except EOFError:
-            print("\nInput stream closed. Exiting...")
-            break
-        except KeyboardInterrupt:
-            print("\nProgram interrupted. Exiting...")
-            break
-
-        if action == "1":
-            url = input("Enter webpage URL: ")
-            process_input(url, "web")
-        elif action == "2":
-            url = input("Enter YouTube video URL: ")
-            process_input(url, "video")
-        elif action == "3":
-            text = input("Enter text: ")
-            process_input(text, "user")
-        elif action == "4":
-            query = input("Ask your question: ")
-            source = input("Optional: Specify a source URL (or press Enter for all content): ").strip() or None
-            response = generate_answer(query, source)
-            print(f"\n### Question\n{query}\n### Answer\n{response}")
-        elif action == "5":
-            source = input("Optional: Specify a source URL (or press Enter for all content): ").strip() or None
-            summary = generate_summary(source)
-            print(f"\n{summary}")
-        elif action == "6":
-            topic = input("Enter the topic for the mock test: ")
-            source = input("Optional: Specify a source URL (or press Enter for all content): ").strip() or None
-            test = generate_mock_test(topic, source)
-            print(f"\n{test}")
-        elif action == "7":
-            topic = input("Enter the topic for the mind map: ")
-            source = input("Optional: Specify a source URL (or press Enter for all content): ").strip() or None
-            result = generate_mind_map(topic, source)
-            print(f"\n{result}")
-        elif action == "8":
-            topic = input("Enter the topic for the flowchart: ")
-            source = input("Optional: Specify a source URL (or press Enter for all content): ").strip() or None
-            result = generate_flowchart(topic, source)
-            print(f"\n{result}")
-        elif action == "9":
-            video_input = input("Enter video file path or YouTube URL: ")
-            domain = input("Enter domain (sports, podcast, news, education, surveillance, generic): ").strip().lower()
-            if domain not in ["sports", "podcast", "news", "education", "surveillance", "generic"]:
-                print("Invalid domain. Please choose from: sports, podcast, news, education, surveillance, generic")
-                continue
-            keyframes, text_output = process_video(video_input, domain)
+            keyframes, text_output = process_video_basic(video_path, domain, output_dir, lang)
             if keyframes:
-                print(f"\n### Video Storyboard for {domain.capitalize()}")
-                print("Keyframes saved:", keyframes)
-                print(text_output)
-            else:
-                print(text_output)
-        elif action == "10":
-            source = input("Enter stream source (e.g., '0' for webcam, RTSP/HTTP URL): ")
-            domain = input("Enter domain (sports, podcast, news, education, surveillance, generic): ").strip().lower()
-            if domain not in ["sports", "podcast", "news", "education", "surveillance", "generic"]:
-                print("Invalid domain. Please choose from: sports, podcast, news, education, surveillance, generic")
-                continue
-            print("Processing live stream. Press Ctrl+C to stop.")
-            try:
-                process_live_stream(source, domain)
-            except KeyboardInterrupt:
-                print("\nLive stream processing stopped.")
-        elif action == "11":
-            video_input = input("Enter video file path or YouTube URL: ")
-            domain = input("Enter domain (sports, podcast, news, education, surveillance, generic): ").strip().lower()
-            if domain not in ["sports", "podcast", "news", "education", "surveillance", "generic"]:
-                print("Invalid domain. Please choose from: sports, podcast, news, education, surveillance, generic")
-                continue
-            
-            max_frames = input("Enter number of key moments to extract (default: 10): ").strip()
-            max_frames = int(max_frames) if max_frames.isdigit() and int(max_frames) > 0 else 10
-            
-            output_dir = input("Enter output directory (default: 'storyboard'): ").strip() or "storyboard"
-            
-            print("\nProcessing video with enhanced visual analysis using YOLOv8...")
-            keyframes, text_output = process_video_enhanced(video_input, domain, output_dir, max_frames)
-            
-            if keyframes:
-                print(f"\n### Enhanced Video Analysis for {domain.capitalize()}")
-                print("Keyframes saved:", keyframes)
-                print(text_output)
-                
-                # Save the latest keyframes for highlight reel creation
-                with open("latest_keyframes.json", "w") as f:
-                    json.dump({"video": video_input, "keyframes": keyframes}, f)
-            else:
-                print(text_output)
-        elif action == "12":
-            try:
-                with open("latest_keyframes.json", "r") as f:
-                    data = json.load(f)
-                    video_input = data["video"]
-                    keyframes = data["keyframes"]
-                
-                if not keyframes:
-                    print("No keyframes available. Please analyze a video first.")
-                    continue
-                
-                output_file = input("Enter output filename (default: 'storyboard/highlight_reel.mp4'): ").strip() or "storyboard/highlight_reel.mp4"
-                
-                print("\nCreating highlight reel...")
-                result = create_highlight_reel(video_input, keyframes, output_file)
-                if result:
-                    print(f"Created highlight reel: {result}")
-                else:
-                    print("Error creating highlight reel.")
-            except FileNotFoundError:
-                print("No analyzed video found. Please run the enhanced video analysis first.")
-            except Exception as e:
-                print(f"Error creating highlight reel: {str(e)}")
-        elif action == "13":
-            print("Goodbye!")
-            break
-        else:
-            print("Invalid option. Please choose 1-13.")
-
-if __name__ == "__main__":
-    main()
+                return jsonify({
+                    'task_id': task_id,
+                    'keyframes': [f"/results/{task_id}/{os.path.basename(kf)}" for kf in keyframes],
+                    'storyboard': f"/results/{task_id}/storyboard.jpg",
+                    'manifest': f"/results/{task_id}/storyboard_manifest.json",
+                    'summary': text_output
+                })
+            return jsonify({'error': text_output}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
     
+    data = request.get_json()
+    youtube_url = data.get('youtube_url')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not youtube_url or not youtube_url.startswith('http'):
+        return jsonify({'error': 'Invalid YouTube URL'}), 400
+    
+    transcript = get_youtube_transcript(youtube_url)
+    if transcript:
+        update_knowledge_base(transcript, youtube_url, "video")
+    
+    try:
+        keyframes, text_output = process_video_basic(youtube_url, domain, output_dir, lang)
+        if keyframes:
+            return jsonify({
+                'task_id': task_id,
+                'keyframes': [f"/results/{task_id}/{os.path.basename(kf)}" for kf in keyframes],
+                'storyboard': f"/results/{task_id}/storyboard.jpg",
+                'manifest': f"/results/{task_id}/storyboard_manifest.json",
+                'summary': text_output
+            })
+        return jsonify({'error': text_output}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/process_live_stream', methods=['POST'])
+def process_live_stream_route():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    data = request.get_json()
+    stream_url = data.get('stream_url')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not stream_url:
+        return jsonify({'error': 'No stream URL provided'}), 400
+    
+    result = process_live_stream(stream_url, domain, output_dir, lang)
+    return jsonify({'task_id': task_id, 'result': result})
+
+@app.route('/analyze_video_enhanced', methods=['POST'])
+def analyze_video_enhanced():
+    task_id = str(uuid.uuid4())
+    output_dir = os.path.join(app.config['RESULTS_FOLDER'], task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if 'video' in request.files:
+        domain = request.form.get('domain', 'generic')
+        lang = request.form.get('lang', 'en')
+        
+        file = request.files['video']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        filename = secure_filename(file.filename)
+        video_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{task_id}_{filename}")
+        file.save(video_path)
+        
+        try:
+            keyframes, text_output = process_video_enhanced(video_path, domain, output_dir, lang)
+            if keyframes:
+                return jsonify({
+                    'task_id': task_id,
+                    'keyframes': [f"/results/{task_id}/{os.path.basename(kf)}" for kf in keyframes],
+                    'storyboard': f"/results/{task_id}/storyboard.jpg",
+                    'manifest': f"/results/{task_id}/storyboard_manifest.json",
+                    'summary': text_output
+                })
+            return jsonify({'error': text_output}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    data = request.get_json()
+    youtube_url = data.get('youtube_url')
+    domain = data.get('domain', 'generic')
+    lang = data.get('lang', 'en')
+    
+    if not youtube_url or not youtube_url.startswith('http'):
+        return jsonify({'error': 'Invalid YouTube URL'}), 400
+    
+    transcript = get_youtube_transcript(youtube_url)
+    if transcript:
+        update_knowledge_base(transcript, youtube_url, "video")
+    
+    try:
+        keyframes, text_output = process_video_enhanced(youtube_url, domain, output_dir, lang)
+        if keyframes:
+            return jsonify({
+                'task_id': task_id,
+                'keyframes': [f"/results/{task_id}/{os.path.basename(kf)}" for kf in keyframes],
+                'storyboard': f"/results/{task_id}/storyboard.jpg",
+                'manifest': f"/results/{task_id}/storyboard_manifest.json",
+                'summary': text_output
+            })
+        return jsonify({'error': text_output}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/results/<task_id>/<path:filename>')
+def serve_result(task_id, filename):
+    result_path = os.path.join(app.config['RESULTS_FOLDER'], task_id, filename)
+    if os.path.exists(result_path):
+        return send_file(result_path)
+    return jsonify({'error': 'File not found'}), 404
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

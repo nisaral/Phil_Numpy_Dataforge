@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KnowledgeForge - Video Analysis Suite</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <style>
+        :root {
+            --primary: #5e35b1;
+            --primary-light: #7c51d1;
+            --secondary: #00bcd4;
+            --dark: #1a1a2e;
+            --light: #f5f5f5;
+            --success: #4caf50;
+            --error: #f44336;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--dark);
+            color: var(--light);
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.8;
+        }
+
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 30px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 30px;
+            margin-bottom: 30px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            transform: translateY(-8px) rotateX(2deg);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+            font-size: 28px;
+            color: var(--secondary);
+            text-shadow: 0 0 10px var(--secondary);
+        }
+
+        .logo i {
+            margin-right: 15px;
+            font-size: 36px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .app-layout {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 30px;
+        }
+
+        h2 {
+            margin-bottom: 25px;
+            color: var(--secondary);
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            text-shadow: 0 0 5px var(--secondary);
+        }
+
+        h2 i {
+            margin-right: 12px;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 500;
+            color: #e0e0e0;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            color: var(--light);
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--secondary);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 10px rgba(0, 188, 212, 0.5);
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 5px 15px rgba(94, 53, 177, 0.4);
+        }
+
+        button:hover {
+            background: var(--primary-light);
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(94, 53, 177, 0.6);
+        }
+
+        button i {
+            margin-right: 10px;
+        }
+
+        .tab-container {
+            margin-bottom: 25px;
+        }
+
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .tab {
+            padding: 12px 25px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 5px 15px rgba(94, 53, 177, 0.4);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .results-area {
+            min-height: 300px;
+        }
+
+        .result-card {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-left: 5px solid var(--secondary);
+            transition: transform 0.3s ease;
+        }
+
+        .result-card:hover {
+            transform: scale(1.03);
+        }
+
+        .result-card h3 {
+            margin-bottom: 15px;
+            color: var(--secondary);
+            font-size: 20px;
+        }
+
+        .keyframe-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 15px;
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+
+        .keyframe-card:hover {
+            transform: scale(1.05);
+        }
+
+        .key-moment {
+            border: 3px solid #ffd700;
+            box-shadow: 0 0 15px #ffd700;
+        }
+
+        .summary-popup {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 10px;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            font-size: 14px;
+        }
+
+        .keyframe-card:hover .summary-popup {
+            transform: translateY(0);
+        }
+
+        .progress-bar {
+            height: 10px;
+            background: #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--secondary);
+            transition: width 0.5s ease;
+        }
+
+        .notification {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--success);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .notification.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .notification.error {
+            background: var(--error);
+        }
+
+        .loader {
+            display: inline-block;
+            width: 25px;
+            height: 25px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .loading-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--secondary);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        .grid {
+            display: grid;
+        }
+
+        .grid-cols-1 {
+            grid-template-columns: 1fr;
+        }
+
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .grid-cols-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .gap-4 {
+            gap: 16px;
+        }
+
+        .mt-2 {
+            margin-top: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .app-layout {
+                grid-template-columns: 1fr;
+            }
+            .container {
+                padding: 20px;
+            }
+            .glass-panel {
+                padding: 20px;
+            }
+            .tabs {
+                flex-direction: column;
+            }
+            #storyboard-container {
+                height: 400px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div class="container">
+        <header class="glass-panel">
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                <span>KnowledgeForge</span>
+            </div>
+            <div>
+                <button id="clear-data"><i class="fas fa-trash"></i> Clear Data</button>
+            </div>
+        </header>
+
+        <div class="app-layout">
+            <div class="glass-panel">
+                <h2><i class="fas fa-tools"></i> Actions</h2>
+                <div class="tab-container">
+                    <div class="tabs">
+                        <div class="tab active" data-tab="add_web">Web Content</div>
+                        <div class="tab" data-tab="add_youtube">YouTube Video</div>
+                        <div class="tab" data-tab="add_text">Text</div>
+                        <div class="tab" data-tab="ask_question">Question</div>
+                        <div class="tab" data-tab="get_summary">Summary</div>
+                        <div class="tab" data-tab="generate_mock_test">Mock Test</div>
+                        <div class="tab" data-tab="generate_mind_map">Mind Map</div>
+                        <div class="tab" data-tab="generate_flowchart">Flowchart</div>
+                        <div class="tab" data-tab="analyze_video_basic">Video (Basic)</div>
+                        <div class="tab" data-tab="process_live_stream">Live Stream</div>
+                        <div class="tab" data-tab="analyze_video_enhanced">Video (Enhanced)</div>
+                        <div class="tab" data-tab="exit">Exit</div>
+                    </div>
+
+                    <div class="tab-content active" id="add_web-tab">
+                        <div class="input-group">
+                            <label for="web-url">Enter a URL to extract content:</label>
+                            <input type="url" id="web-url" placeholder="https://example.com/article">
+                        </div>
+                        <div class="input-group">
+                            <label for="web-lang">Language:</label>
+                            <select id="web-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="add-web-content"><i class="fas fa-globe"></i> Add Web Content</button>
+                    </div>
+
+                    <div class="tab-content" id="add_youtube-tab">
+                        <div class="input-group">
+                            <label for="youtube-url">Enter a YouTube URL:</label>
+                            <input type="url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=...">
+                        </div>
+                        <div class="input-group">
+                            <label for="youtube-lang">Language:</label>
+                            <select id="youtube-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="add-youtube-content"><i class="fab fa-youtube"></i> Add YouTube Video</button>
+                    </div>
+
+                    <div class="tab-content" id="add_text-tab">
+                        <div class="input-group">
+                            <label for="custom-text">Enter your own content:</label>
+                            <textarea id="custom-text" rows="5" placeholder="Paste or type your content here..."></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="text-lang">Language:</label>
+                            <select id="text-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="add-text-content"><i class="fas fa-file-alt"></i> Add Text Content</button>
+                    </div>
+
+                    <div class="tab-content" id="ask_question-tab">
+                        <div class="input-group">
+                            <label for="question">Ask anything about your content:</label>
+                            <input type="text" id="question" placeholder="What is the main concept of...?">
+                        </div>
+                        <div class="input-group">
+                            <label for="question-lang">Language:</label>
+                            <select id="question-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="ask-button"><i class="fas fa-search"></i> Ask Question</button>
+                    </div>
+
+                    <div class="tab-content" id="get_summary-tab">
+                        <div class="input-group">
+                            <label for="summary-text">Text to summarize:</label>
+                            <textarea id="summary-text" rows="5" placeholder="Paste or type text to summarize..."></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="summary-lang">Language:</label>
+                            <select id="summary-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="get-summary"><i class="fas fa-compress-alt"></i> Generate Summary</button>
+                    </div>
+
+                    <div class="tab-content" id="generate_mock_test-tab">
+                        <div class="input-group">
+                            <label for="mock-test-text">Text content:</label>
+                            <textarea id="mock-test-text" rows="5" placeholder="Paste or type content for mock test..."></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="mock-test-domain">Domain:</label>
+                            <select id="mock-test-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="mock-test-lang">Language:</label>
+                            <select id="mock-test-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="generate-mock-test"><i class="fas fa-clipboard-check"></i> Generate Mock Test</button>
+                    </div>
+
+                    <div class="tab-content" id="generate_mind_map-tab">
+                        <div class="input-group">
+                            <label for="mind-map-text">Text content:</label>
+                            <textarea id="mind-map-text" rows="5" placeholder="Paste or type content for mind map..."></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="mind-map-domain">Domain:</label>
+                            <select id="mind-map-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="mind-map-lang">Language:</label>
+                            <select id="mind-map-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="generate-mind-map"><i class="fas fa-project-diagram"></i> Generate Mind Map</button>
+                    </div>
+
+                    <div class="tab-content" id="generate_flowchart-tab">
+                        <div class="input-group">
+                            <label for="flowchart-text">Text content:</label>
+                            <textarea id="flowchart-text" rows="5" placeholder="Paste or type content for flowchart..."></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="flowchart-domain">Domain:</label>
+                            <select id="flowchart-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="flowchart-lang">Language:</label>
+                            <select id="flowchart-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="generate-flowchart"><i class="fas fa-random"></i> Generate Flowchart</button>
+                    </div>
+
+                    <div class="tab-content" id="analyze_video_basic-tab">
+                        <div class="input-group">
+                            <label for="video-file">Video File (.mp4, .mov) or YouTube URL:</label>
+                            <input type="file" id="video-file" accept=".mp4,.mov">
+                            <input type="url" id="video-youtube-url" placeholder="Or enter YouTube URL" class="mt-2">
+                        </div>
+                        <div class="input-group">
+                            <label for="video-basic-domain">Domain:</label>
+                            <select id="video-basic-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group domain-specific" id="video-basic-domain-specific" style="display: none;">
+                            <label>Domain-Specific Options:</label>
+                            <div id="video-basic-domain-options"></div>
+                        </div>
+                        <div class="input-group">
+                            <label for="video-basic-lang">Language:</label>
+                            <select id="video-basic-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="analyze-video-basic"><i class="fas fa-video"></i> Analyze Video (Basic)</button>
+                    </div>
+
+                    <div class="tab-content" id="process_live_stream-tab">
+                        <div class="input-group">
+                            <label for="stream-url">Stream URL:</label>
+                            <input type="url" id="stream-url" placeholder="Enter live stream URL">
+                        </div>
+                        <div class="input-group">
+                            <label for="stream-domain">Domain:</label>
+                            <select id="stream-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group domain-specific" id="stream-domain-specific" style="display: none;">
+                            <label>Domain-Specific Options:</label>
+                            <div id="stream-domain-options"></div>
+                        </div>
+                        <div class="input-group">
+                            <label for="stream-lang">Language:</label>
+                            <select id="stream-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="process-live-stream"><i class="fas fa-stream"></i> Process Live Stream</button>
+                    </div>
+
+                    <div class="tab-content" id="analyze_video_enhanced-tab">
+                        <div class="input-group">
+                            <label for="video-enhanced-file">Video File (.mp4, .mov) or YouTube URL:</label>
+                            <input type="file" id="video-enhanced-file" accept=".mp4,.mov">
+                            <input type="url" id="video-enhanced-youtube-url" placeholder="Or enter YouTube URL" class="mt-2">
+                        </div>
+                        <div class="input-group">
+                            <label for="video-enhanced-domain">Domain:</label>
+                            <select id="video-enhanced-domain">
+                                {% for domain in domains %}
+                                    <option value="{{ domain }}">{{ domain.capitalize() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="input-group domain-specific" id="video-enhanced-domain-specific" style="display: none;">
+                            <label>Domain-Specific Options:</label>
+                            <div id="video-enhanced-domain-options"></div>
+                        </div>
+                        <div class="input-group">
+                            <label for="video-enhanced-lang">Language:</label>
+                            <select id="video-enhanced-lang">
+                                {% for lang in languages %}
+                                    <option value="{{ lang }}">{{ supported_languages[lang]['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="analyze-video-enhanced"><i class="fas fa-video"></i> Analyze Video (Enhanced)</button>
+                    </div>
+
+                    <div class="tab-content" id="exit-tab">
+                        <p>Click below to reload the application.</p>
+                        <button onclick="location.reload()"><i class="fas fa-sign-out-alt"></i> Exit</button>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="glass-panel results-area">
+                    <h2><i class="fas fa-lightbulb"></i> Results</h2>
+                    <div id="results-container">
+                        <div class="result-card">
+                            <h3>Welcome to KnowledgeForge</h3>
+                            <p>
+                                Start by selecting an action from the left panel. Add content, ask questions, or analyze videos to generate insights, summaries, and visualizations.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="notification" id="notification">Operation successful!</div>
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <script>
+        // 3D Particle Background
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("canvas-container").appendChild(renderer.domElement);
+
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlesCount = 1500;
+        const posArray = new Float32Array(particlesCount * 3);
+
+        for (let i = 0; i < particlesCount * 3; i++) {
+            posArray[i] = (Math.random() - 0.5) * 15;
+        }
+
+        particlesGeometry.setAttribute("position", new THREE.BufferAttribute(posArray, 3));
+        const particlesMaterial = new THREE.PointsMaterial({
+            size: 0.03,
+            color: 0x00bcd4,
+            transparent: true,
+            opacity: 0.9,
+        });
+
+        const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+        scene.add(particlesMesh);
+
+        camera.position.z = 5;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            particlesMesh.rotation.x += 0.0008;
+            particlesMesh.rotation.y += 0.0008;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Tab Functionality
+        const tabs = document.querySelectorAll(".tab");
+        tabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                tabs.forEach(t => t.classList.remove("active"));
+                tab.classList.add("active");
+                document.querySelectorAll(".tab-content").forEach(content => {
+                    content.classList.remove("active");
+                });
+                document.getElementById(`${tab.dataset.tab}-tab`).classList.add("active");
+                gsap.from(`#${tab.dataset.tab}-tab`, { opacity: 0, y: 50, duration: 0.5 });
+            });
+        });
+
+        // Notification and Loading
+        function showNotification(message, isError = false) {
+            const notification = document.getElementById("notification");
+            notification.textContent = message;
+            notification.classList.remove("error");
+            if (isError) notification.classList.add("error");
+            notification.classList.add("show");
+            setTimeout(() => notification.classList.remove("show"), 3000);
+        }
+
+        function toggleLoading(show) {
+            document.getElementById("loading-overlay").classList.toggle("active", show);
+        }
+
+        // Domain-Specific Options
+        const domainOptions = {
+            'sports': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="player-stats"> Track Player Stats</label>
+                    <label><input type="checkbox" name="game-dynamics"> Analyze Game Dynamics</label>
+                </div>
+            `,
+            'education': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="quiz-generator"> Generate Quiz</label>
+                    <label><input type="checkbox" name="key-concepts"> Extract Key Concepts</label>
+                </div>
+            `,
+            'news': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="event-timeline"> Create Event Timeline</label>
+                    <label><input type="checkbox" name="headline-extraction"> Extract Headlines</label>
+                </div>
+            `,
+            'podcast': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="speaker-identification"> Identify Speakers</label>
+                    <label><input type="checkbox" name="topic-segmentation"> Segment Topics</label>
+                </div>
+            `,
+            'surveillance': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="motion-detection"> Detect Motion</label>
+                    <label><input type="checkbox" name="anomaly-alerts"> Anomaly Alerts</label>
+                </div>
+            `,
+            'generic': `
+                <div class="input-group">
+                    <label><input type="checkbox" name="scene-analysis"> Scene Analysis</label>
+                    <label><input type="checkbox" name="object-detection"> Object Detection</label>
+                </div>
+            `
+        };
+
+        function updateDomainOptions(selectId, optionsContainerId) {
+            const select = document.getElementById(selectId);
+            const optionsContainer = document.getElementById(optionsContainerId);
+            const domainSpecificContainer = document.getElementById(`${selectId.split('-')[0]}-domain-specific`);
+
+            select.addEventListener('change', () => {
+                const domain = select.value;
+                optionsContainer.innerHTML = domainOptions[domain] || '';
+                domainSpecificContainer.style.display = domain ? 'block' : 'none';
+                gsap.from(`#${optionsContainerId}`, { opacity: 0, y: 20, duration: 0.3 });
+            });
+        }
+
+        updateDomainOptions('video-basic-domain', 'video-basic-domain-options');
+        updateDomainOptions('stream-domain', 'stream-domain-options');
+        updateDomainOptions('video-enhanced-domain', 'video-enhanced-domain-options');
+
+        // Add Result
+        function addResult(title, content, isImage = false, isStoryboard = false, manifest = null) {
+            const resultsContainer = document.getElementById("results-container");
+            const resultCard = document.createElement("div");
+            resultCard.className = "result-card";
+            resultCard.innerHTML = `<h3>${title}</h3>`;
+
+            if (isImage && !isStoryboard) {
+                resultCard.innerHTML += `<div class="${title.toLowerCase().includes("mind") ? "mind-map" : "flowchart"}-container"><img src="${content}" alt="${title}" style="max-width: 100%; border-radius: 15px;"></div>`;
+            } else if (isStoryboard) {
+                resultCard.innerHTML += `
+                    <div id="storyboard-container" style="position: relative; height: 600px;">
+                        <canvas id="storyboard-canvas"></canvas>
+                    </div>
+                    <h4>Key Moments</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        ${manifest.keyframes.filter(kf => kf.is_key_moment).map(moment => `
+                            <div class="keyframe-card key-moment">
+                                <img src="${moment.path}" alt="Key Moment ${moment.index + 1}" style="width: 100%; height: auto;">
+                                <div class="summary-popup">${moment.summary}<br>Time: ${moment.timestamp.toFixed(1)}s</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                setTimeout(() => renderStoryboard(manifest), 100);
+            } else {
+                resultCard.innerHTML += `<p>${content.replace(/\n/g, "<br>")}</p>`;
+            }
+            resultsContainer.prepend(resultCard);
+            gsap.from(resultCard, { opacity: 0, y: 50, duration: 0.5 });
+        }
+
+        // 3D Storyboard Rendering
+        function renderStoryboard(manifest) {
+            const canvas = document.getElementById("storyboard-canvas");
+            if (!canvas) return;
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+            const textureLoader = new THREE.TextureLoader();
+            const cards = [];
+
+            manifest.keyframes.forEach((keyframe, index) => {
+                const texture = textureLoader.load(keyframe.path, () => {
+                    // Ensure texture is loaded before rendering
+                    renderer.render(scene, camera);
+                });
+                const geometry = new THREE.PlaneGeometry(2, 1.5);
+                const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                const card = new THREE.Mesh(geometry, material);
+                card.position.set(
+                    (keyframe.x / 100 - manifest.cols * 0.5) * 2,
+                    (keyframe.y / 100 - manifest.rows * 1.5) * 2,
+                    keyframe.z / 50
+                );
+                card.userData = keyframe;
+                scene.add(card);
+                cards.push(card);
+
+                // Animate card entrance
+                gsap.from(card.position, {
+                    z: -10,
+                    duration: 1,
+                    delay: index * 0.1,
+                    ease: "power2.out"
+                });
+                gsap.from(card.scale, {
+                    x: 0,
+                    y: 0,
+                    duration: 1,
+                    delay: index * 0.1,
+                    ease: "power2.out"
+                });
+            });
+
+            camera.position.z = 10;
+
+            // Mouse interaction
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            canvas.addEventListener('mousemove', (event) => {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(cards);
+
+                cards.forEach(card => {
+                    card.scale.set(1, 1, 1);
+                    card.position.z = card.userData.z / 50;
+                });
+
+                if (intersects.length > 0) {
+                    const card = intersects[0].object;
+                    gsap.to(card.scale, { x: 1.2, y: 1.2, duration: 0.3 });
+                    gsap.to(card.position, { z: card.position.z + 2, duration: 0.3 });
+                }
+            });
+
+            function animateStoryboard() {
+                requestAnimationFrame(animateStoryboard);
+                renderer.render(scene, camera);
+            }
+            animateStoryboard();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = canvas.clientWidth / canvas.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+            });
+        }
+
+        // Event Listeners
+        document.getElementById("add-web-content").addEventListener("click", () => {
+            const url = document.getElementById("web-url").value.trim();
+            const lang = document.getElementById("web-lang").value;
+            if (!url) return showNotification("Please enter a valid URL", true);
+            toggleLoading(true);
+            fetch("http://localhost:5000/add_web", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ web_url: url, lang })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    toggleLoading(false);
+                    if (data.error) {
+                        showNotification(data.error, true);
+                    } else {
+                        showNotification("Web content added successfully");
+                        addResult("Web Content", data.content);
+                        document.getElementById("web-url").value = "";
+                    }
+                })
+                .catch(error => {
+                    toggleLoading(false);
+                    showNotification("Failed to add web content", true);
+                });
+        });
+
+        document.getElementById("add-youtube-content").addEventListener("click", () => {
+            const url = document.getElementById("youtube-url").value.trim();
+            const lang = document.getElementById("youtube-lang").value;
+            if (!url) return showNotification("Please enter a valid YouTube URL", true);
+            toggleLoading(true);
+            fetch("http://localhost:5000/add_youtube", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ youtube_url: url, lang })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    toggleLoading(false);
+                    if (data.error) {
+                        showNotification(data.error, true);
+                    } else {
+                        showNotification("YouTube content added successfully");
+                        addResult("YouTube Transcript", data.content);
+                        document.getElementById("youtube-url").value = "";
+                    }
+                })
+                .catch(error => {
+                    toggleLoading(false);
+                    showNotification("Failed to add YouTube content", true);
+                });
+        });
+
+        document.getElementById("add-text-content").addEventListener("click", () => {
+            const text = document.getElementById("custom-text").value.trim();
+            const lang = document.getElementById("text-lang").value;
+            if (!text) return showNotification("Please enter some text content", true);
+            toggleLoading(true);
+            fetch("http://localhost:5000/add_text", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text, lang })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    toggleLoading(false);
+                    if (data.error) {
+                        showNotification(data.error, true);
+                    } else {
+                        showNotification("Text content added successfully");
+                        addResult("Text Content", data.content);
+                        document.getElementById("custom-text").value = "";
+                    }
+                })
+                .catch(error => {
+                    toggleLoading(false);
+                    showNotification("Failed to add text content", true);
+                });
+        });
+
+        document.getElementById("ask-button").addEventListener("click", () => {
+            const question = document.getElementById("question").value.trim();
+            const lang = document.getElementById("question-lang").value;
+            if (!question) return showNotification("Please enter a question", true);
+            toggleLoading(true);
+            fetch("http://localhost:5000/ask_question", {
+                method: "POST",
+                headers: { "Content-Type": "application opening brackets code block ```
+            ```css
+            ```json
+            {
+                "error": "Invalid input"
+            }
+            ```python
+            def process_video():
+                pass
+            ```
+            ```javascript       
